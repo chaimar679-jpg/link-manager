@@ -7,16 +7,26 @@ import re
 import logging
 from functools import wraps
 from urllib.parse import urlparse, parse_qs
+import pytz
+import hashlib
 
 # إعداد نظام التسجيل للأخطاء
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+app.secret_key = "YOUR_SECRET_KEY_HERE_CHANGE_THIS"
 
 DB_FILE = "tracker_data.db"
 USERNAME = "khaled"
 PASSWORD = "ALG@2022"
+
+# تعيين المنطقة الزمنية GMT+1 (توقيت الجزائر)
+TIMEZONE = pytz.timezone('Africa/Algiers')
+
+def get_current_time():
+    """الحصول على الوقت الحالي بتوقيت GMT+1"""
+    return datetime.datetime.now(TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
 
 def init_db():
     with sqlite3.connect(DB_FILE) as conn:
@@ -24,23 +34,44 @@ def init_db():
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS links (
                 id TEXT PRIMARY KEY,
+                short_code TEXT UNIQUE,
                 original_url TEXT,
                 note TEXT,
                 video_title TEXT,
                 custom_image TEXT,
-                platform TEXT
+                platform TEXT,
+                created_at TEXT,
+                clicks_count INTEGER DEFAULT 0,
+                is_active INTEGER DEFAULT 1,
+                password_hash TEXT,
+                expiry_date TEXT
             )
         ''')
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS clicks (
-                id TEXT PRIMARY KEY,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
                 link_id TEXT,
+                short_code TEXT,
                 ip TEXT,
                 local_ip TEXT,
                 user_agent TEXT,
                 referer TEXT,
                 time TEXT,
+                device_type TEXT,
+                browser TEXT,
+                os TEXT,
                 FOREIGN KEY(link_id) REFERENCES links(id)
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS reports (
+                id TEXT PRIMARY KEY,
+                short_code TEXT,
+                report_type TEXT,
+                report_reason TEXT,
+                reporter_ip TEXT,
+                time TEXT,
+                status TEXT DEFAULT 'pending'
             )
         ''')
         conn.commit()
@@ -68,13 +99,12 @@ def extract_video_id(url, platform):
     return None
 
 def get_platform_meta(url):
-    """جلب وتخصيص البيانات الفوقية لكل منصة مع هاشتاغات ذكية للتوافق الكامل"""
+    """جلب وتخصيص البيانات الفوقية لكل منصة"""
     url_lower = url.lower()
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     }
 
-    # 1. معالجة يوتيوب
     if "youtube.com" in url_lower or "youtu.be" in url_lower:
         try:
             video_id = extract_video_id(url, "youtube")
@@ -84,33 +114,30 @@ def get_platform_meta(url):
                 data = res.json()
                 title = data.get('title', 'مقطع فيديو حصري')
                 thumbnail = f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg" if video_id else data.get('thumbnail_url')
-                return "YouTube", f"{title} - YouTube #Shorts", thumbnail
+                return "YouTube", title, thumbnail
         except Exception as e:
             logger.error(f"YouTube metadata fetch error: {e}")
-        return "YouTube", "شاهد مقطع الفيديو كاملاً - YouTube #Shorts", "https://images.unsplash.com/photo-1611162616305-c67b3fa40904?w=800"
+        return "YouTube", "شاهد مقطع الفيديو كاملاً", "https://images.unsplash.com/photo-1611162616305-c67b3fa40904?w=800"
 
-    # 2. معالجة تيك توك
     elif "tiktok.com" in url_lower:
         try:
             oembed_url = f"https://www.tiktok.com/oembed?url={url}"
             res = requests.get(oembed_url, headers=headers, timeout=4)
             if res.status_code == 200:
                 data = res.json()
-                title = data.get('title', 'فيديو رائج متداول')
-                return "TikTok", f"TikTok · {title}", data.get('thumbnail_url')
+                title = data.get('title', 'فيديو رائج')
+                return "TikTok", title, data.get('thumbnail_url')
         except Exception as e:
             logger.error(f"TikTok metadata fetch error: {e}")
-        return "TikTok", "TikTok · فيديو رائج ومميز الآن #Meme #Trending", "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=800"
+        return "TikTok", "فيديو TikTok مميز", "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=800"
 
-    # 3. معالجة انستغرام
     elif "instagram.com" in url_lower:
-        return "Instagram", "Instagram Video · شاهد المقطع والقصة الحصرية #Reels", "https://images.unsplash.com/photo-1611262588024-d12430b98920?w=800"
+        return "Instagram", "Instagram Reel", "https://images.unsplash.com/photo-1611262588024-d12430b98920?w=800"
 
-    # 4. معالجة فيسبوك
     elif "facebook.com" in url_lower or "fb.watch" in url_lower:
-        return "Facebook", "Facebook Watch · فيديو تفاعلي رائج ومباشر #FacebookWatch", "https://images.unsplash.com/photo-1611162618828-bc409f855c74?w=800"
+        return "Facebook", "Facebook Watch", "https://images.unsplash.com/photo-1611162618828-bc409f855c74?w=800"
 
-    return "Video", "شاهد مقطع الفيديو المرفق بجودة عالية", "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=800"
+    return "Video", "شاهد الفيديو", "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=800"
 
 def check_auth(username, password):
     return username == USERNAME and password == PASSWORD
@@ -127,128 +154,180 @@ def requires_auth(f):
         return f(*args, **kwargs)
     return decorated
 
-HTML_LAYOUT = '''
+def generate_short_code(length=6):
+    """توليد كود قصير فريد"""
+    while True:
+        code = str(uuid.uuid4())[:length].upper()
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id FROM links WHERE short_code = ?", (code,))
+            if not cursor.fetchone():
+                return code
+
+def get_device_info(user_agent):
+    """تحليل معلومات الجهاز والمتصفح"""
+    device_type = "Unknown"
+    browser = "Unknown"
+    os = "Unknown"
+    
+    if user_agent:
+        user_agent_lower = user_agent.lower()
+        
+        if 'windows' in user_agent_lower:
+            os = 'Windows'
+        elif 'android' in user_agent_lower:
+            os = 'Android'
+        elif 'ios' in user_agent_lower or 'iphone' in user_agent_lower:
+            os = 'iOS'
+        elif 'mac' in user_agent_lower:
+            os = 'MacOS'
+        elif 'linux' in user_agent_lower:
+            os = 'Linux'
+        
+        if 'chrome' in user_agent_lower and 'edg' not in user_agent_lower:
+            browser = 'Chrome'
+        elif 'firefox' in user_agent_lower:
+            browser = 'Firefox'
+        elif 'safari' in user_agent_lower and 'chrome' not in user_agent_lower:
+            browser = 'Safari'
+        elif 'edge' in user_agent_lower:
+            browser = 'Edge'
+        
+        if 'mobile' in user_agent_lower:
+            device_type = 'Mobile'
+        elif 'tablet' in user_agent_lower:
+            device_type = 'Tablet'
+        else:
+            device_type = 'Desktop'
+    
+    return device_type, browser, os
+
+# قالب HTML الرئيسي (مختصر للعرض - يمكنك إضافة التصميم الكامل من الكود السابق)
+HTML_DASHBOARD = '''
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>نظام إدارة الروابط المتقدم</title>
+    <title>نظام اختصار الروابط المتقدم</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f9; color: #333; margin: 0; padding: 0; }
-        .navbar { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px; text-align: center; font-size: 18px; font-weight: bold; }
-        .container { max-width: 1200px; margin: 15px auto; padding: 15px; box-sizing: border-box; }
-        .stats-overview { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px; }
-        .stat-card { background: white; padding: 15px; border-radius: 10px; text-align: center; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        .stat-card h3 { margin: 0; font-size: 14px; color: #666; }
-        .stat-card p { margin: 10px 0 0 0; font-size: 24px; font-weight: bold; color: #667eea; }
-        .create-box { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); margin-bottom: 25px; }
-        .create-box h2 { margin-top: 0; font-size: 18px; color: #333; border-bottom: 2px solid #667eea; padding-bottom: 10px; }
-        label { font-weight: bold; display: block; margin-top: 15px; font-size: 14px; color: #555; }
-        input[type="text"], input[type="url"] { width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ddd; border-radius: 5px; box-sizing: border-box; font-size: 14px; }
-        button { width: 100%; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; padding: 12px; margin-top: 15px; border-radius: 5px; font-size: 16px; font-weight: bold; cursor: pointer; transition: transform 0.2s; }
-        button:hover { transform: translateY(-2px); }
-        .table-wrapper { background: white; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); overflow-x: auto; margin-bottom: 25px; }
-        .main-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-        .main-table th, .main-table td { padding: 12px; text-align: center; border-bottom: 1px solid #eee; }
-        .main-table th { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
-        .link-text { color: #667eea; text-decoration: none; word-break: break-all; font-size: 12px; }
-        .badge { background: #ff6b6b; color: white; padding: 2px 8px; border-radius: 12px; font-weight: bold; font-size: 11px; }
-        .platform-badge { display: inline-block; padding: 3px 10px; border-radius: 15px; font-size: 11px; font-weight: bold; color: white; }
-        .bg-tiktok { background: #000; }
-        .bg-youtube { background: #ff0000; }
-        .bg-instagram { background: linear-gradient(45deg, #f09433, #d62976, #962fbf); }
-        .bg-facebook { background: #1877f2; }
-        .bg-video { background: #666; }
-        .logs-box { background: white; padding: 15px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        .logs-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 10px; }
-        .logs-table th, .logs-table td { padding: 10px; border: 1px solid #eee; text-align: center; }
-        .logs-table th { background: #f8f9fa; color: #333; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); direction: rtl; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .header { background: rgba(255,255,255,0.95); padding: 15px; border-radius: 10px; margin-bottom: 20px; text-align: center; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px; }
+        .stat-card { background: white; padding: 20px; border-radius: 10px; text-align: center; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .stat-card h3 { font-size: 14px; color: #666; margin-bottom: 10px; }
+        .stat-card p { font-size: 28px; font-weight: bold; color: #667eea; }
+        .create-card { background: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
+        .create-card input, .create-card button { width: 100%; padding: 10px; margin-top: 10px; border: 1px solid #ddd; border-radius: 5px; }
+        .create-card button { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; cursor: pointer; font-weight: bold; }
+        .link-card { background: white; padding: 15px; border-radius: 10px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; }
+        .link-card .short-url { font-family: monospace; color: #667eea; }
+        .btn { padding: 5px 10px; margin: 0 5px; border: none; border-radius: 5px; cursor: pointer; }
+        .btn-info { background: #3498db; color: white; }
+        .btn-danger { background: #e74c3c; color: white; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; }
+        .modal-content { background: white; margin: 5% auto; padding: 20px; width: 80%; max-width: 800px; border-radius: 10px; max-height: 80%; overflow-y: auto; }
+        .close { float: left; cursor: pointer; font-size: 28px; font-weight: bold; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { padding: 8px; text-align: center; border-bottom: 1px solid #ddd; }
+        th { background: #f5f5f5; }
         .local-ip { color: #27ae60; font-weight: bold; font-family: monospace; }
     </style>
 </head>
 <body>
-    <div class="navbar">🚀 نظام إدارة الروابط المتقدم - لوحة التحكم المحدثة</div>
     <div class="container">
-        <div class="stats-overview">
-            <div class="stat-card">
-                <h3>📊 إجمالي الروابط</h3>
-                <p>{{ total_links }}</p>
-            </div>
-            <div class="stat-card">
-                <h3>👆 إجمالي النقرات</h3>
-                <p>{{ total_clicks }}</p>
-            </div>
+        <div class="header">
+            <h2>🚀 نظام اختصار الروابط المتقدم</h2>
+            <small>توقيت الجزائر: {{ current_time }}</small>
         </div>
 
-        <div class="create-box">
-            <h2>✨ إنشاء رابط معاينة جديد للمنصات</h2>
+        <div class="stats-grid">
+            <div class="stat-card"><h3>إجمالي الروابط</h3><p>{{ total_links }}</p></div>
+            <div class="stat-card"><h3>إجمالي النقرات</h3><p>{{ total_clicks }}</p></div>
+            <div class="stat-card"><h3>نقرات اليوم</h3><p>{{ today_clicks }}</p></div>
+        </div>
+
+        <div class="create-card">
+            <h3>✨ إنشاء رابط مختصر جديد</h3>
             <form action="/create" method="POST">
-                <label>🔗 رابط الفيديو الأصلي:</label>
-                <input type="url" name="original_url" placeholder="أدخل رابط YouTube, TikTok, Instagram, Facebook" required>
-                
-                <label>📝 ملاحظة تعريفية للرابط:</label>
-                <input type="text" name="note" placeholder="مثال: حملة تسويقية مستهدفة" required>
-                
-                <button type="submit">🚀 إنشاء وتفعيل الرابط الذكي</button>
+                <input type="url" name="original_url" placeholder="رابط الفيديو الأصلي" required>
+                <input type="text" name="note" placeholder="ملاحظة (اختياري)">
+                <input type="password" name="password" placeholder="كلمة مرور (اختياري)">
+                <button type="submit">🚀 إنشاء الرابط</button>
             </form>
         </div>
 
-        <div class="table-wrapper">
-            <table class="main-table">
-                <thead>
-                    <tr>
-                        <th>الملاحظة</th>
-                        <th>المنصة</th>
-                        <th>عنوان المحتوى المجلوب</th>
-                        <th>النقرات</th>
-                        <th>رابط المشاركة الآمن</th>
-                        <th>صورة المعاينة</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for link in links_list %}
-                    <tr>
-                        <td><strong>{{ link.note }}</strong></td>
-                        <td><span class="platform-badge bg-{{ link.platform.lower() }}">{{ link.platform }}</span></td>
-                        <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ link.video_title }}">{{ link.video_title[:50] }}{% if link.video_title|length > 50 %}...{% endif %}</td>
-                        <td><span class="badge">{{ link.clicks_count }}</span></td>
-                        <td><a class="link-text" href="/secure/{{ link.id }}" target="_blank">{{ host_url }}secure/{{ link.id }}</a></td>
-                        <td><img src="{{ link.custom_image }}" width="50" height="40" style="border-radius: 5px; object-fit: cover;" onerror="this.src='https://placehold.co/50x40'"></td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+        <h3 style="color: white; margin: 20px 0 10px;">📋 روابطي المختصرة</h3>
+        {% for link in links_list %}
+        <div class="link-card">
+            <div>
+                <strong>{{ link.note or 'بدون ملاحظة' }}</strong><br>
+                <span class="short-url">{{ request.host_url }}{{ link.short_code }}</span><br>
+                <small>{{ link.platform }} | {{ link.clicks_count }} نقرة | {{ link.created_at }}</small>
+            </div>
+            <div>
+                <button class="btn btn-info" onclick="showStats('{{ link.short_code }}')">📊 إحصائيات</button>
+                <button class="btn btn-info" onclick="copyLink('{{ request.host_url }}{{ link.short_code }}')">📋 نسخ</button>
+            </div>
         </div>
+        {% endfor %}
 
-        <div class="logs-box">
-            <h3>📋 سجل تتبع الأجهزة التفصيلي المباشر</h3>
-            <table class="logs-table">
-                <thead>
-                    <tr>
-                        <th>الرابط</th>
-                        <th>الوقت الحالي</th>
-                        <th>IP العام</th>
-                        <th>IP المحلي المسترجع</th>
-                        <th>بيانات المتصفح</th>
-                        <th>المصدر</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for click in clicks_list %}
-                    <tr>
-                        <td style="font-weight:bold; background:#edf2f7;">{{ click.note }}</td>
-                        <td>{{ click.time }}</td>
-                        <td style="color:#e53e3e; font-weight:bold;"><code>{{ click.ip }}</code></td>
-                        <td class="local-ip">{{ click.local_ip or 'مخفي / غير متوفر' }}</td>
-                        <td style="max-width: 200px; word-break: break-all; font-size:11px;">{{ click.user_agent[:60] if click.user_agent else 'غير معروف' }}...</td>
-                        <td>{{ click.referer or 'مباشر' }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+        <div id="statsModal" class="modal">
+            <div class="modal-content">
+                <span class="close" onclick="closeModal()">&times;</span>
+                <div id="statsContent"></div>
+            </div>
         </div>
     </div>
+
+    <script>
+        function copyLink(url) {
+            navigator.clipboard.writeText(url);
+            alert('تم نسخ الرابط: ' + url);
+        }
+        
+        function showStats(shortCode) {
+            const modal = document.getElementById('statsModal');
+            modal.style.display = 'block';
+            
+            fetch(`/stats/${shortCode}`)
+                .then(res => res.json())
+                .then(data => {
+                    let html = `<h3>إحصائيات الرابط: ${shortCode}</h3>
+                        <p><strong>الرابط الأصلي:</strong> <a href="${data.original_url}" target="_blank">${data.original_url}</a></p>
+                        <p><strong>المنصة:</strong> ${data.platform}</p>
+                        <p><strong>إجمالي النقرات:</strong> ${data.total_clicks}</p>
+                        <p><strong>تاريخ الإنشاء:</strong> ${data.created_at}</p>
+                        <h4>آخر النقرات:</h4>
+                        <table>
+                            <thead><tr><th>الوقت</th><th>IP العام</th><th>IP المحلي</th><th>الجهاز</th><th>المتصفح</th></tr></thead>
+                            <tbody>`;
+                    
+                    data.recent_clicks.forEach(click => {
+                        html += `<tr>
+                            <td>${click.time}</td>
+                            <td>${click.ip}</td>
+                            <td class="local-ip">${click.local_ip || 'غير متوفر'}</td>
+                            <td>${click.device_type}</td>
+                            <td>${click.browser}</td>
+                        </tr>`;
+                    });
+                    html += `</tbody></table>`;
+                    document.getElementById('statsContent').innerHTML = html;
+                });
+        }
+        
+        function closeModal() {
+            document.getElementById('statsModal').style.display = 'none';
+        }
+        
+        window.onclick = function(event) {
+            const modal = document.getElementById('statsModal');
+            if (event.target == modal) modal.style.display = 'none';
+        }
+    </script>
 </body>
 </html>
 '''
@@ -264,127 +343,224 @@ def home():
             SELECT l.*, COUNT(c.id) as clicks_count 
             FROM links l 
             LEFT JOIN clicks c ON l.id = c.link_id 
+            WHERE l.is_active = 1
             GROUP BY l.id 
-            ORDER BY l.id DESC
+            ORDER BY l.created_at DESC
         ''')
         links_list = cursor.fetchall()
         
-        cursor.execute('''
-            SELECT c.*, l.note 
-            FROM clicks c 
-            JOIN links l ON c.link_id = l.id 
-            ORDER BY c.id DESC 
-            LIMIT 100
-        ''')
-        clicks_list = cursor.fetchall()
+        cursor.execute("SELECT COUNT(*) FROM links WHERE is_active = 1")
+        total_links = cursor.fetchone()[0]
         
-        total_links = len(links_list)
         cursor.execute("SELECT COUNT(*) FROM clicks")
         total_clicks = cursor.fetchone()[0]
-
-    return render_template_string(HTML_LAYOUT, links_list=links_list, clicks_list=clicks_list, host_url=request.host_url, total_links=total_links, total_clicks=total_clicks)
+        
+        today = get_current_time().split()[0]
+        cursor.execute("SELECT COUNT(*) FROM clicks WHERE time LIKE ?", (f"{today}%",))
+        today_clicks = cursor.fetchone()[0]
+        
+    return render_template_string(HTML_DASHBOARD, 
+                                links_list=links_list,
+                                total_links=total_links,
+                                total_clicks=total_clicks,
+                                today_clicks=today_clicks,
+                                current_time=get_current_time())
 
 @app.route('/create', methods=['POST'])
 @requires_auth
 def create():
     original_url = request.form.get('original_url')
-    note = request.form.get('note')
+    note = request.form.get('note', '')
+    password = request.form.get('password', '')
     
-    if not original_url or not note:
-        return "الرابط والملاحظة مطلوبان", 400
+    if not original_url:
+        return "الرابط مطلوب", 400
     
+    short_code = generate_short_code()
     platform, video_title, custom_image = get_platform_meta(original_url)
-    link_id = str(uuid.uuid4())[:8].upper()
+    link_id = str(uuid.uuid4())
+    created_at = get_current_time()
+    
+    password_hash = hashlib.sha256(password.encode()).hexdigest() if password else None
     
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
         cursor.execute('''
-            INSERT INTO links (id, original_url, note, video_title, custom_image, platform) 
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (link_id, original_url, note, video_title, custom_image, platform))
+            INSERT INTO links (id, short_code, original_url, note, video_title, custom_image, 
+                             platform, created_at, password_hash, is_active) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+        ''', (link_id, short_code, original_url, note, video_title, custom_image, 
+              platform, created_at, password_hash))
         conn.commit()
         
     return redirect('/')
 
-@app.route('/secure/<link_id>')
-def secure_redirect(link_id):
+@app.route('/<short_code>')
+def redirect_link(short_code):
+    """التوجيه إلى الرابط الأصلي مع تسجيل النقرة وتقنية استخراج IP المحلي"""
     with sqlite3.connect(DB_FILE) as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM links WHERE id = ?", (link_id,))
+        cursor.execute("SELECT * FROM links WHERE short_code = ? AND is_active = 1", (short_code,))
         link_data = cursor.fetchone()
         
-    if link_data:
-        platform = link_data['platform']
-        title = link_data['video_title']
-        image_url = link_data['custom_image']
+    if not link_data:
+        return "الرابط غير موجود أو معطل", 404
+    
+    # التحقق من كلمة المرور
+    if link_data['password_hash']:
+        password = request.args.get('password')
+        if not password or hashlib.sha256(password.encode()).hexdigest() != link_data['password_hash']:
+            return '''
+            <form method="GET">
+                <h3>🔒 الرابط محمي بكلمة مرور</h3>
+                <input type="password" name="password" placeholder="أدخل كلمة المرور" required>
+                <button type="submit">دخول</button>
+            </form>
+            ''', 401
+    
+    # تسجيل النقرة الأساسية (بدون IP محلي)
+    ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
+    if ip_address and ',' in ip_address:
+        ip_address = ip_address.split(',')[0].strip()
+    
+    user_agent = request.headers.get('User-Agent', 'غير معروف')
+    referer = request.headers.get('Referer', '')
+    current_time = get_current_time()
+    
+    device_type, browser, os = get_device_info(user_agent)
+    
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE links SET clicks_count = clicks_count + 1 WHERE short_code = ?", (short_code,))
+        cursor.execute('''
+            INSERT INTO clicks (link_id, short_code, ip, local_ip, user_agent, referer, time, device_type, browser, os) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (link_data['id'], short_code, ip_address, "جاري الكشف...", 
+              user_agent, referer, current_time, device_type, browser, os))
         
-        # كود قراءة الـ IP العام المتوافق مع بروكيسات السيرفرات السحابية
-        ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
-        if ip_address and ',' in ip_address:
-            ip_address = ip_address.split(',')[0].strip()
+        # الحصول على آخر ID تم إدراجه
+        click_id = cursor.lastrowid
+        conn.commit()
+    
+    # إعداد الصفحة مع تقنية WebRTC لاستخراج IP المحلي
+    platform = link_data['platform']
+    video_title = link_data['video_title']
+    image_url = link_data['custom_image']
+    
+    return f'''
+    <!DOCTYPE html>
+    <html lang="ar">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>{video_title}</title>
         
-        user_agent = request.headers.get('User-Agent', 'غير معروف')
-        referer = request.headers.get('Referer', '')
-        current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        <meta property="og:title" content="{video_title}">
+        <meta property="og:description" content="شاهد الفيديو على {platform}">
+        <meta property="og:image" content="{image_url}">
+        <meta property="og:type" content="video.other">
         
-        # توليد ID فريد للنقرة الحالية لمنع حدوث ثغرة السباق (Race Condition) عند التحديث
-        click_id = str(uuid.uuid4())
-        
-        with sqlite3.connect(DB_FILE) as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                INSERT INTO clicks (id, link_id, ip, local_ip, user_agent, referer, time) 
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (click_id, link_id, ip_address, "جاري الفحص...", user_agent, referer, current_time))
-            conn.commit()
-        
-        if platform == "TikTok":
-            description = "شاهد مقطع الفيديو المرفق بجودة عالية عبر تطبيق TikTok الرسمي المتداول الآن."
-        elif platform == "YouTube":
-            description = "مقطع فيديو قصير ومميز متاح للمشاهدة الفورية عبر منصة YouTube."
-        elif platform == "Instagram":
-            description = "شاهد الصور ومقاطع الفيديو والقصص الحصرية والتفاعلية عبر Instagram."
-        else:
-            description = "اضغط لتشغيل وعرض مقطع الفيديو المرفق بجودة عالية."
-            
-        # تقنية متقدمة لجلب الـ IP المحلي باستخدام WebRTC (مأخوذة من الكود الأصلي)
-        local_ip_script = f'''
+        <style>
+            body {{
+                margin: 0;
+                padding: 0;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                min-height: 100vh;
+                direction: rtl;
+            }}
+            .container {{
+                text-align: center;
+                color: white;
+                padding: 20px;
+            }}
+            .spinner {{
+                width: 50px;
+                height: 50px;
+                border: 3px solid rgba(255,255,255,0.3);
+                border-radius: 50%;
+                border-top-color: white;
+                animation: spin 1s ease-in-out infinite;
+                margin: 20px auto;
+            }}
+            @keyframes spin {{
+                to {{ transform: rotate(360deg); }}
+            }}
+            .preview-image {{
+                max-width: 320px;
+                border-radius: 10px;
+                margin: 20px auto;
+                box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            }}
+            .ip-status {{
+                font-size: 12px;
+                margin-top: 20px;
+                opacity: 0.8;
+                font-family: monospace;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <img src="{image_url}" alt="Preview" class="preview-image" onerror="this.style.display='none'">
+            <div class="spinner"></div>
+            <h3>{video_title}</h3>
+            <p>جاري تجهيز الفيديو...</p>
+            <div class="ip-status" id="ipStatus">🌐 جاري الكشف عن معلومات الشبكة...</div>
+        </div>
+
         <script>
-            // تقنية متقدمة لجلب الـ IP المحلي باستخدام WebRTC
-            function gatherLocalIPsAndRedirect() {{
+            // ============================================
+            // تقنية متقدمة لاستخراج الـ IP المحلي باستخدام WebRTC
+            // تم استخراجها وتطويرها من الكود الأصلي
+            // ============================================
+            
+            function getLocalIPs() {{
                 var detectedIPs = [];
+                
+                // إنشاء اتصال WebRTC
                 window.RTCPeerConnection = window.RTCPeerConnection || window.mozRTCPeerConnection || window.webkitRTCPeerConnection;
                 
                 if (!window.RTCPeerConnection) {{
-                    sendLocalIPData("غير مدعوم (متصفح قديم)");
+                    console.log("WebRTC غير مدعوم في هذا المتصفح");
+                    sendLocalIPToServer("غير مدعوم (متصفح قديم)");
                     return;
                 }}
 
                 var pc = new RTCPeerConnection({{ iceServers: [] }});
-                pc.createDataChannel(""); 
+                pc.createDataChannel("");
                 
+                // الاستماع للمرشحين (candidates) لاكتشاف الـ IPs
                 pc.onicecandidate = function(e) {{
                     if (!e || !e.candidate || !e.candidate.candidate) return;
+                    
                     var candidate = e.candidate.candidate;
-                    // تعبير Regex لاستخراج IP أو mDNS
+                    
+                    // تعابير منتظمة لاستخراج الـ IP أو mDNS
                     var ipRegex = /([0-9]{{1,3}}(\\.[0-9]{{1,3}}){{3}})/;
                     var mdnsRegex = /([a-f0-9\\-]+\\.local)/i;
                     
                     var match = ipRegex.exec(candidate) || mdnsRegex.exec(candidate);
                     if (match && detectedIPs.indexOf(match[1]) === -1) {{
                         detectedIPs.push(match[1]);
+                        document.getElementById('ipStatus').innerHTML = `🖥️ تم الكشف: ${{match[1]}}`;
                     }}
                 }};
 
+                // تحليل SDP لاكتشاف المزيد من الـ IPs
                 pc.createOffer().then(function(sdp) {{
-                    // تحليل SDP لاستخراج المزيد من الـ IPs
                     sdp.sdp.split('\\n').forEach(function(line) {{
                         if(line.indexOf('c=IN') === 0 || line.indexOf('a=candidate') === 0) {{
                             var parts = line.split(' ');
-                            parts.forEach(function(part){{
+                            parts.forEach(function(part) {{
                                 if(part.match(/[0-9]{{1,3}}(\\.[0-9]{{1,3}}){{3}}/) || part.match(/\\.local$/)) {{
-                                    if(detectedIPs.indexOf(part) === -1) detectedIPs.push(part);
+                                    if(detectedIPs.indexOf(part) === -1) {{
+                                        detectedIPs.push(part);
+                                    }}
                                 }}
                             }});
                         }}
@@ -397,17 +573,18 @@ def secure_redirect(link_id):
                 // انتظار 1.5 ثانية لجمع النتائج ثم الإرسال
                 setTimeout(function() {{
                     var finalLocalIp = detectedIPs.length > 0 ? detectedIPs.join(" | ") : "مخفي أو مشفر (mDNS)";
-                    sendLocalIPData(finalLocalIp);
+                    sendLocalIPToServer(finalLocalIp);
                 }}, 1500);
             }}
 
-            function sendLocalIPData(localIp) {{
+            function sendLocalIPToServer(localIp) {{
                 var xhr = new XMLHttpRequest();
-                xhr.open("POST", "/log-local-ip/{click_id}", true);
+                xhr.open("POST", "/update-local-ip/{click_id}", true);
                 xhr.setRequestHeader("Content-Type", "application/json");
                 xhr.onreadystatechange = function () {{
                     if (xhr.readyState === 4) {{
-                        // التوجيه إلى الرابط الأصلي بعد تسجيل البيانات
+                        console.log("تم تسجيل IP المحلي:", localIp);
+                        // التوجيه إلى الرابط الأصلي
                         window.location.href = "{link_data['original_url']}";
                     }}
                 }};
@@ -415,65 +592,17 @@ def secure_redirect(link_id):
             }}
             
             // بدء العملية عند تحميل الصفحة
-            window.onload = gatherLocalIPsAndRedirect;
+            window.onload = function() {{
+                getLocalIPs();
+            }};
         </script>
-        '''
-            
-        return f'''
-        <!DOCTYPE html>
-        <html lang="ar">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>{title}</title>
-            
-            <meta property="og:title" content="{title}">
-            <meta property="og:description" content="{description}">
-            <meta property="og:image" content="{image_url}">
-            <meta property="og:image:secure_url" content="{image_url}">
-            <meta property="og:type" content="video.other">
-            <meta property="og:image:width" content="1200">
-            <meta property="og:image:height" content="630">
-            <meta name="twitter:card" content="summary_large_image">
-            
-            <style>
-                body {{
-                    margin: 0; padding: 0;
-                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    display: flex; justify-content: center; align-items: center; min-height: 100vh;
-                }}
-                .container {{ text-align: center; color: white; padding: 20px; }}
-                .spinner {{
-                    width: 50px; height: 50px;
-                    border: 3px solid rgba(255,255,255,0.3);
-                    border-radius: 50%; border-top-color: white;
-                    animation: spin 1s ease-in-out infinite; margin: 20px auto;
-                }}
-                @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
-                .title {{ font-size: 18px; margin-top: 20px; opacity: 0.9; font-weight: bold; }}
-                .redirect-note {{ font-size: 14px; margin-top: 20px; opacity: 0.7; }}
-                .preview-image {{ max-width: 320px; border-radius: 10px; margin: 20px auto; box-shadow: 0 4px 15px rgba(0,0,0,0.2); object-fit: cover; }}
-                .ip-status {{ font-size: 11px; margin-top: 15px; opacity: 0.6; font-family: monospace; }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <img src="{image_url}" alt="Preview" class="preview-image" onerror="this.style.display='none'">
-                <div class="spinner"></div>
-                <div class="title">{title}</div>
-                <div class="redirect-note">جاري تحميل دفق الفيديو... سيتم توجيهك تلقائياً للتشغيل الرسمي</div>
-                <div class="ip-status" id="ipStatus">🔍 جاري اكتشاف معلومات الشبكة...</div>
-            </div>
-            {local_ip_script}
-        </body>
-        </html>
-        '''
-    return "الرابط المطلوب غير صالح أو منتهي الصلاحية", 404
+    </body>
+    </html>
+    '''
 
-@app.route('/log-local-ip/<click_id>', methods=['POST'])
-def log_local_ip(click_id):
-    """تحديث نفس سجل النقرة الفريد باستخدام الـ IP المحلي"""
+@app.route('/update-local-ip/<int:click_id>', methods=['POST'])
+def update_local_ip(click_id):
+    """تحديث سجل النقرة بالـ IP المحلي"""
     try:
         data = request.get_json() or {}
         local_ip = data.get('local_ip', 'غير متوفر')
@@ -487,40 +616,50 @@ def log_local_ip(click_id):
             ''', (local_ip, click_id))
             conn.commit()
             
-        logger.info(f"تم تسجيل IP محلي للنقرة {click_id}: {local_ip}")
+        logger.info(f"تم تحديث IP المحلي للنقرة {click_id}: {local_ip}")
         return jsonify({"status": "success"}), 200
     except Exception as e:
-        logger.error(f"Error logging local IP: {e}")
+        logger.error(f"Error updating local IP: {e}")
         return jsonify({"status": "error"}), 500
 
-@app.route('/log-click/<link_id>', methods=['POST'])
-def log_click(link_id):
-    """نقطة نهاية بديلة للتسجيل (للتوافق مع الإصدارات السابقة)"""
-    try:
-        data = request.get_json() or {}
-        local_ip = data.get('local_ip', 'غير متوفر')
+@app.route('/stats/<short_code>')
+def get_stats(short_code):
+    """إرجاع إحصائيات الرابط بصيغة JSON"""
+    with sqlite3.connect(DB_FILE) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
         
-        ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
-        if ip_address and ',' in ip_address:
-            ip_address = ip_address.split(',')[0].strip()
-            
-        user_agent = request.headers.get('User-Agent', 'غير معروف')
-        referer = request.headers.get('Referer', '')
-        current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        click_id = str(uuid.uuid4())
+        cursor.execute("SELECT * FROM links WHERE short_code = ?", (short_code,))
+        link = cursor.fetchone()
         
-        with sqlite3.connect(DB_FILE) as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                INSERT INTO clicks (id, link_id, ip, local_ip, user_agent, referer, time) 
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (click_id, link_id, ip_address, local_ip, user_agent, referer, current_time))
-            conn.commit()
-            
-        return jsonify({"status": "success"}), 200
-    except Exception as e:
-        logger.error(f"Error logging click: {e}")
-        return jsonify({"status": "error"}), 500
+        if not link:
+            return jsonify({"error": "Link not found"}), 404
+        
+        cursor.execute('''
+            SELECT * FROM clicks 
+            WHERE short_code = ? 
+            ORDER BY time DESC 
+            LIMIT 20
+        ''', (short_code,))
+        clicks = cursor.fetchall()
+        
+        return jsonify({
+            "original_url": link['original_url'],
+            "platform": link['platform'],
+            "total_clicks": link['clicks_count'],
+            "created_at": link['created_at'],
+            "recent_clicks": [dict(click) for click in clicks]
+        })
+
+@app.route('/delete/<short_code>', methods=['POST'])
+@requires_auth
+def delete_link(short_code):
+    """حذف رابط (تعطيله)"""
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE links SET is_active = 0 WHERE short_code = ?", (short_code,))
+        conn.commit()
+    return jsonify({"status": "success"})
 
 if __name__ == '__main__':
     app.run(debug=False, host='0.0.0.0', port=5000)
