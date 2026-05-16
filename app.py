@@ -4,7 +4,13 @@ import datetime
 import sqlite3
 import requests
 import re
+import logging
 from functools import wraps
+from urllib.parse import urlparse, parse_qs
+
+# إعداد نظام التسجيل للأخطاء
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
@@ -25,13 +31,15 @@ def init_db():
                 platform TEXT
             )
         ''')
+        # تم إبقاء حقل local_ip متاحاً لاستقبال البيانات المتاحة مع تلافي أخطاء التحديث
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS clicks (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id TEXT PRIMARY KEY,
                 link_id TEXT,
                 ip TEXT,
                 local_ip TEXT,
-                device TEXT,
+                user_agent TEXT,
+                referer TEXT,
                 time TEXT,
                 FOREIGN KEY(link_id) REFERENCES links(id)
             )
@@ -40,85 +48,70 @@ def init_db():
 
 init_db()
 
+def extract_video_id(url, platform):
+    """استخراج ID الفيديو من الرابط بشكل دقيق"""
+    try:
+        parsed = urlparse(url)
+        if platform == "youtube":
+            if parsed.hostname in ('youtu.be', 'www.youtu.be'):
+                return parsed.path[1:]
+            if parsed.hostname in ('youtube.com', 'www.youtube.com', 'm.youtube.com'):
+                if parsed.path == '/watch':
+                    return parse_qs(parsed.query).get('v', [None])[0]
+                if parsed.path.startswith(('/embed/', '/v/', '/shorts/')):
+                    return parsed.path.split('/')[2]
+        elif platform == "tiktok":
+            match = re.search(r'/video/(\d+)', url)
+            if match:
+                return match.group(1)
+    except Exception as e:
+        logger.error(f"Error extracting video ID: {e}")
+    return None
+
 def get_platform_meta(url):
+    """جلب وتخصيص البيانات الفوقية لكل منصة مع هاشتاغات ذكية للتوافق الكامل"""
     url_lower = url.lower()
-    
-    # القوالب الاحتياطية الذكية والشعارات عالية الدقة لكل منصة لضمان الفعالية الدائمة
-    fallbacks = {
-        "YouTube": {
-            "title": "YouTube • شاهد مقطع الفيديو بجودة عالية",
-            "image": "https://images.unsplash.com/photo-1611162616305-c67b3fa40904?w=800"
-        },
-        "TikTok": {
-            "title": "TikTok • شاهد الفيديو الرائج المتداول الآن",
-            "image": "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=800"
-        },
-        "Instagram": {
-            "title": "Instagram Video • شاهد المنشور والمقطع كاملاً عبر انستغرام",
-            "image": "https://images.unsplash.com/photo-1611262588024-d12430b98920?w=800"
-        },
-        "Facebook": {
-            "title": "Facebook Watch • فيديو رائج وتفاعلي حصري",
-            "image": "https://images.unsplash.com/photo-1611162618828-bc409f855c74?w=800"
-        },
-        "Generic": {
-            "title": "شاهد مقطع الفيديو المرفق الحصري",
-            "image": "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=800"
-        }
-    }
-    
-    # ترويسة مخصصة لتقليد المتصفحات الحقيقية وتجنب الحظر أثناء جلب البيانات
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
 
-    # 1. معالجة روابط يوتيوب
+    # 1. معالجة يوتيوب
     if "youtube.com" in url_lower or "youtu.be" in url_lower:
         try:
-            api_url = f"https://www.youtube.com/oembed?url={url}&format=json"
-            res = requests.get(api_url, headers=headers, timeout=4)
+            video_id = extract_video_id(url, "youtube")
+            oembed_url = f"https://www.youtube.com/oembed?url={url}&format=json"
+            res = requests.get(oembed_url, headers=headers, timeout=4)
             if res.status_code == 200:
                 data = res.json()
-                return "YouTube", data.get('title', fallbacks["YouTube"]["title"]), data.get('thumbnail_url', fallbacks["YouTube"]["image"])
-        except:
-            pass
-        return "YouTube", fallbacks["YouTube"]["title"], fallbacks["YouTube"]["image"]
+                title = data.get('title', 'مقطع فيديو حصري')
+                thumbnail = f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg" if video_id else data.get('thumbnail_url')
+                return "YouTube", f"{title} - YouTube #Shorts", thumbnail
+        except Exception as e:
+            logger.error(f"YouTube metadata fetch error: {e}")
+        return "YouTube", "شاهد مقطع الفيديو كاملاً - YouTube #Shorts", "https://images.unsplash.com/photo-1611162616305-c67b3fa40904?w=800"
 
-    # 2. معالجة روابط تيك توك
-    elif "tiktok.com" in url_lower or "vt.tiktok" in url_lower:
+    # 2. معالجة تيك توك
+    elif "tiktok.com" in url_lower:
         try:
-            api_url = f"https://www.tiktok.com/oembed?url={url}"
-            res = requests.get(api_url, headers=headers, timeout=4)
+            oembed_url = f"https://www.tiktok.com/oembed?url={url}"
+            res = requests.get(oembed_url, headers=headers, timeout=4)
             if res.status_code == 200:
                 data = res.json()
-                return "TikTok", data.get('title', fallbacks["TikTok"]["title"]), data.get('thumbnail_url', fallbacks["TikTok"]["image"])
-        except:
-            pass
-        return "TikTok", fallbacks["TikTok"]["title"], fallbacks["TikTok"]["image"]
+                title = data.get('title', 'فيديو رائج متداول')
+                return "TikTok", f"TikTok · {title}", data.get('thumbnail_url')
+        except Exception as e:
+            logger.error(f"TikTok metadata fetch error: {e}")
+        return "TikTok", "TikTok · فيديو رائج ومميز الآن #Meme #Trending", "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=800"
 
-    # 3. معالجة روابط انستغرام
+    # 3. معالجة انستغرام
     elif "instagram.com" in url_lower:
-        # نظراً لقيود Meta الصارمة، يتم توفير واجهة معاينة احترافية ثابتة تضمن التوافق المستقبلي وعدم انهيار الكود
-        return "Instagram", fallbacks["Instagram"]["title"], fallbacks["Instagram"]["image"]
+        return "Instagram", "Instagram Video · شاهد المقطع والقصة الحصرية #Reels", "https://images.unsplash.com/photo-1611262588024-d12430b98920?w=800"
 
-    # 4. معالجة روابط فيسبوك
+    # 4. معالجة فيسبوك
     elif "facebook.com" in url_lower or "fb.watch" in url_lower:
-        try:
-            # محاولة محاكاة كشط سريع للـ Meta tags الأساسية إذا سمح السيرفر بذلك
-            res = requests.get(url, headers=headers, timeout=4)
-            if res.status_code == 200:
-                html = res.text
-                title_match = re.search(r'<meta property="og:title" content="([^"]+)"', html)
-                image_match = re.search(r'<meta property="og:image" content="([^"]+)"', html)
-                
-                title = title_match.group(1) if title_match else fallbacks["Facebook"]["title"]
-                image = image_match.group(1) if image_match else fallbacks["Facebook"]["image"]
-                return "Facebook", title, image
-        except:
-            pass
-        return "Facebook", fallbacks["Facebook"]["title"], fallbacks["Facebook"]["image"]
+        return "Facebook", "Facebook Watch · فيديو تفاعلي رائج ومباشر #FacebookWatch", "https://images.unsplash.com/photo-1611162618828-bc409f855c74?w=800"
 
-    return "Video", fallbacks["Generic"]["title"], fallbacks["Generic"]["image"]
+    return "Video", "شاهد مقطع الفيديو المرفق بجودة عالية", "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=800"
 
 def check_auth(username, password):
     return username == USERNAME and password == PASSWORD
@@ -129,7 +122,7 @@ def requires_auth(f):
         auth = request.authorization
         if not auth or not check_auth(auth.username, auth.password):
             return Response(
-                'يجب تسجيل الدخول للوصول إلى لوحة التحكم.', 401,
+                'يرجى تسجيل الدخول للوصول إلى لوحة التحكم.', 401,
                 {'WWW-Authenticate': 'Basic realm="Login Required"'}
             )
         return f(*args, **kwargs)
@@ -141,139 +134,121 @@ HTML_LAYOUT = '''
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>منصتي الذكية المتقدمة لإدارة الروابط</title>
+    <title>نظام إدارة الروابط المتقدم</title>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f9; color: #333; margin: 0; padding: 0; }
-        .navbar { background-color: #1a252f; color: white; padding: 15px; text-align: center; font-size: 18px; font-weight: bold; }
-        .container { max-width: 900px; margin: 15px auto; padding: 15px; box-sizing: border-box; }
-        .stats-overview { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 20px; }
-        .stat-card { background: white; padding: 15px; border-radius: 8px; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.05); border-top: 4px solid #34495e; }
-        .stat-card h3 { margin: 0; font-size: 13px; color: #7f8c8d; }
-        .stat-card p { margin: 5px 0 0 0; font-size: 20px; font-weight: bold; color: #2c3e50; }
-        .create-box { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); margin-bottom: 25px; }
-        .create-box h2 { margin-top: 0; font-size: 16px; color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 5px; }
-        label { font-weight: bold; display: block; margin-top: 10px; font-size: 14px; color: #555; }
-        input[type="text"], input[type="url"] { width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-size: 14px; }
-        button { width: 100%; background-color: #3498db; color: white; border: none; padding: 12px; margin-top: 15px; border-radius: 4px; font-size: 15px; font-weight: bold; cursor: pointer; }
-        .section-title { font-size: 16px; color: #2c3e50; margin: 20px 0 10px 0; font-weight: bold; }
-        .table-wrapper { background: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); overflow-x: auto; margin-bottom: 25px; }
-        .main-table { width: 100%; border-collapse: collapse; font-size: 13px; text-align: center; }
-        .main-table th, .main-table td { padding: 12px 10px; border-bottom: 1px solid #edf2f7; }
-        .main-table th { background-color: #34495e; color: white; }
-        .link-text { color: #3498db; text-decoration: none; word-break: break-all; font-size: 12px; }
-        .badge { background: #e74c3c; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold; }
-        .platform-badge { display: inline-block; padding: 3px 8px; border-radius: 12px; font-size: 11px; font-weight: bold; color: white; }
-        .bg-tiktok { background-color: #010101; }
-        .bg-youtube { background-color: #ff0000; }
-        .bg-instagram { background-color: #e1306c; }
-        .bg-facebook { background-color: #1877f2; }
-        .bg-video { background-color: #7f8c8d; }
-        .logs-box { background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); margin-top: 20px; }
-        .logs-table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: center; margin-top: 10px; }
-        .logs-table th, .logs-table td { padding: 10px; border: 1px solid #e2e8f0; }
-        .logs-table th { background-color: #2c3e50; color: white; }
+        .navbar { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px; text-align: center; font-size: 18px; font-weight: bold; }
+        .container { max-width: 1200px; margin: 15px auto; padding: 15px; box-sizing: border-box; }
+        .stats-overview { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px; }
+        .stat-card { background: white; padding: 15px; border-radius: 10px; text-align: center; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .stat-card h3 { margin: 0; font-size: 14px; color: #666; }
+        .stat-card p { margin: 10px 0 0 0; font-size: 24px; font-weight: bold; color: #667eea; }
+        .create-box { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); margin-bottom: 25px; }
+        .create-box h2 { margin-top: 0; font-size: 18px; color: #333; border-bottom: 2px solid #667eea; padding-bottom: 10px; }
+        label { font-weight: bold; display: block; margin-top: 15px; font-size: 14px; color: #555; }
+        input[type="text"], input[type="url"] { width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ddd; border-radius: 5px; box-sizing: border-box; font-size: 14px; }
+        button { width: 100%; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; padding: 12px; margin-top: 15px; border-radius: 5px; font-size: 16px; font-weight: bold; cursor: pointer; transition: transform 0.2s; }
+        button:hover { transform: translateY(-2px); }
+        .table-wrapper { background: white; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); overflow-x: auto; margin-bottom: 25px; }
+        .main-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .main-table th, .main-table td { padding: 12px; text-align: center; border-bottom: 1px solid #eee; }
+        .main-table th { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
+        .link-text { color: #667eea; text-decoration: none; word-break: break-all; font-size: 12px; }
+        .badge { background: #ff6b6b; color: white; padding: 2px 8px; border-radius: 12px; font-weight: bold; font-size: 11px; }
+        .platform-badge { display: inline-block; padding: 3px 10px; border-radius: 15px; font-size: 11px; font-weight: bold; color: white; }
+        .bg-tiktok { background: #000; }
+        .bg-youtube { background: #ff0000; }
+        .bg-instagram { background: linear-gradient(45deg, #f09433, #d62976, #962fbf); }
+        .bg-facebook { background: #1877f2; }
+        .bg-video { background: #666; }
+        .logs-box { background: white; padding: 15px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .logs-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 10px; }
+        .logs-table th, .logs-table td { padding: 10px; border: 1px solid #eee; text-align: center; }
+        .logs-table th { background: #f8f9fa; color: #333; }
+        .local-ip { color: #27ae60; font-weight: bold; font-family: monospace; }
     </style>
 </head>
 <body>
-    <div class="navbar">📊 لوحة الإدارة المتقدمة - نظام المعاينة الرباعي المستقر</div>
+    <div class="navbar">🚀 نظام إدارة الروابط المتقدم - لوحة التحكم المحدثة</div>
     <div class="container">
-        
         <div class="stats-overview">
             <div class="stat-card">
-                <h3>إجمالي الروابط النشطة</h3>
+                <h3>📊 إجمالي الروابط</h3>
                 <p>{{ total_links }}</p>
             </div>
-            <div class="stat-card" style="border-top-color: #e74c3c;">
-                <h3>إجمالي النقرات المسجلة</h3>
+            <div class="stat-card">
+                <h3>👆 إجمالي النقرات</h3>
                 <p>{{ total_clicks }}</p>
             </div>
         </div>
 
         <div class="create-box">
-            <h2>🔗 توليد رابط جديد للمنصات الأربع (YouTube, TikTok, Instagram, Facebook)</h2>
+            <h2>✨ إنشاء رابط معاينة جديد للمنصات</h2>
             <form action="/create" method="POST">
-                <label>رابط الفيديو الأصلي:</label>
-                <input type="url" name="original_url" placeholder="https://..." required>
+                <label>🔗 رابط الفيديو الأصلي:</label>
+                <input type="url" name="original_url" placeholder="أدخل رابط YouTube, TikTok, Instagram, Facebook" required>
                 
-                <label>ملاحظة لتمييز الرابط:</label>
-                <input type="text" name="note" placeholder="مثال: حملة منصة فيسبوك المستهدفة" required>
+                <label>📝 ملاحظة تعريفية للرابط:</label>
+                <input type="text" name="note" placeholder="مثال: حملة تسويقية مستهدفة" required>
                 
-                <button type="submit">إنشاء وتفعيل نظام المعاينة المتوافق</button>
+                <button type="submit">🚀 إنشاء وتفعيل الرابط الذكي</button>
             </form>
         </div>
 
-        <div class="section-title">📋 الروابط النشطة الحالية ومحاكاة المنصات</div>
         <div class="table-wrapper">
             <table class="main-table">
                 <thead>
                     <tr>
                         <th>الملاحظة</th>
                         <th>المنصة</th>
-                        <th>العنوان النشط</th>
+                        <th>عنوان المحتوى المجلوب</th>
                         <th>النقرات</th>
-                        <th>الرابط الذكي للمشاركة</th>
+                        <th>رابط المشاركة الآمن</th>
                         <th>صورة المعاينة</th>
                     </tr>
                 </thead>
                 <tbody>
-                    {% if not links_list %}
+                    {% for link in links_list %}
                     <tr>
-                        <td colspan="6" style="padding: 20px; color: #95a5a6;">لا توجد روابط منشأة حالياً.</td>
+                        <td><strong>{{ link.note }}</strong></td>
+                        <td><span class="platform-badge bg-{{ link.platform.lower() }}">{{ link.platform }}</span></td>
+                        <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ link.video_title }}">{{ link.video_title }}</td>
+                        <td><span class="badge">{{ link.clicks_count }}</span></td>
+                        <td><a class="link-text" href="/secure/{{ link.id }}" target="_blank">{{ host_url }}secure/{{ link.id }}</a></td>
+                        <td><img src="{{ link.custom_image }}" width="50" height="40" style="border-radius: 5px; object-fit: cover;" onerror="this.src='https://placehold.co/50x40'"></td>
                     </tr>
-                    {% else %}
-                        {% for link in links_list %}
-                        <tr>
-                            <td style="font-weight: bold; color: #2c3e50;">{{ link.note }}</td>
-                            <td>
-                                <span class="platform-badge {% if link.platform == 'TikTok' %}bg-tiktok{% elif link.platform == 'YouTube' %}bg-youtube{% elif link.platform == 'Instagram' %}bg-instagram{% elif link.platform == 'Facebook' %}bg-facebook{% else %}bg-video{% endif %}">
-                                    {{ link.platform }}
-                                </span>
-                            </td>
-                            <td style="max-width: 150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="{{ link.video_title }}">{{ link.video_title }}</td>
-                            <td><span class="badge">{{ link.clicks_count }}</span></td>
-                            <td><a class="link-text" href="/secure/{{ link.id }}" target="_blank">{{ host_url }}secure/{{ link.id }}</a></td>
-                            <td>
-                                <img src="{{ link.custom_image }}" width="50" height="40" style="border-radius:4px; object-fit:cover;" onerror="this.src='https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=100'">
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    {% endif %}
+                    {% endfor %}
                 </tbody>
             </table>
         </div>
 
-        <div class="section-title">🔍 سجل الأجهزة المباشر (Logs)</div>
         <div class="logs-box">
+            <h3>📋 سجل تتبع الأجهزة التفصيلي المباشر</h3>
             <table class="logs-table">
                 <thead>
                     <tr>
-                        <th>الرابط (الملاحظة)</th>
-                        <th>الوقت (Date/Time)</th>
-                        <th>الـ IP العام</th>
-                        <th>الـ IP المحلي (LAN)</th>
-                        <th>بيانات الهاتف والمتصفح</th>
+                        <th>الرابط</th>
+                        <th>الوقت الحالي</th>
+                        <th>IP العام</th>
+                        <th>IP المحلي المسترجع</th>
+                        <th>بيانات المتصفح</th>
+                        <th>المصدر</th>
                     </tr>
                 </thead>
                 <tbody>
-                    {% if not clicks_list %}
+                    {% for click in clicks_list %}
                     <tr>
-                        <td colspan="5" style="padding: 20px; color: #95a5a6;">بانتظار تسجيل أول نقرة...</td>
+                        <td style="font-weight:bold; background:#edf2f7;">{{ click.note }}</td>
+                        <td>{{ click.time }}</td>
+                        <td style="color:#e53e3e; font-weight:bold;"><code>{{ click.ip }}</code></td>
+                        <td class="local-ip">{{ click.local_ip or 'مخفي / غير متوفر' }}</td>
+                        <td style="max-width: 200px; word-break: break-all; font-size:11px;">{{ click.user_agent[:60] }}...</td>
+                        <td>{{ click.referer or 'مباشر' }}</td>
                     </tr>
-                    {% else %}
-                        {% for click in clicks_list %}
-                        <tr>
-                            <td style="background: #fcf8e3; font-weight: bold;">{{ click.note }}</td>
-                            <td>{{ click.time }}</td>
-                            <td style="color:#e74c3c; font-weight:bold;">{{ click.ip }}</td>
-                            <td style="color:#27ae60; font-weight:bold;">{{ click.local_ip }}</td>
-                            <td style="font-size:11px; text-align:right; max-width:250px; word-break:break-all;">{{ click.device }}</td>
-                        </tr>
-                        {% endfor %}
-                    {% endif %}
+                    {% endfor %}
                 </tbody>
             </table>
         </div>
-
     </div>
 </body>
 </html>
@@ -287,16 +262,20 @@ def home():
         cursor = conn.cursor()
         
         cursor.execute('''
-            SELECT l.id, l.original_url, l.note, l.video_title, l.custom_image, l.platform, COUNT(c.id) as clicks_count 
-            FROM links l LEFT JOIN clicks c ON l.id = c.link_id 
-            GROUP BY l.id
+            SELECT l.*, COUNT(c.id) as clicks_count 
+            FROM links l 
+            LEFT JOIN clicks c ON l.id = c.link_id 
+            GROUP BY l.id 
+            ORDER BY l.id DESC
         ''')
         links_list = cursor.fetchall()
         
         cursor.execute('''
-            SELECT c.ip, c.local_ip, c.device, c.time, l.note 
-            FROM clicks c JOIN links l ON c.link_id = l.id 
-            ORDER BY c.id DESC
+            SELECT c.*, l.note 
+            FROM clicks c 
+            JOIN links l ON c.link_id = l.id 
+            ORDER BY c.id DESC 
+            LIMIT 100
         ''')
         clicks_list = cursor.fetchall()
         
@@ -312,8 +291,11 @@ def create():
     original_url = request.form.get('original_url')
     note = request.form.get('note')
     
+    if not original_url or not note:
+        return "الرابط والملاحظة مطلوبان", 400
+    
     platform, video_title, custom_image = get_platform_meta(original_url)
-    link_id = str(uuid.uuid4())[:6].upper()
+    link_id = str(uuid.uuid4())[:8].upper()
     
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
@@ -335,25 +317,77 @@ def secure_redirect(link_id):
         
     if link_data:
         platform = link_data['platform']
-        video_title = link_data['video_title']
+        title = link_data['video_title']
         image_url = link_data['custom_image']
         
-        # صياغة وصف المعاينة والتاغات تلقائياً بناءً على المنصة المستهدفة لمنع الشكوك
+        # كود قراءة الـ IP العام المتوافق مع بروكيسات السيرفرات السحابية
+        ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
+        if ip_address and ',' in ip_address:
+            ip_address = ip_address.split(',')[0].strip()
+        
+        user_agent = request.headers.get('User-Agent', 'غير معروف')
+        referer = request.headers.get('Referer', '')
+        current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # توليد ID فريد للنقرة الحالية لمنع حدوث ثغرة السباق (Race Condition) عند التحديث
+        click_id = str(uuid.uuid4())
+        
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO clicks (id, link_id, ip, local_ip, user_agent, referer, time) 
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (click_id, link_id, ip_address, "جاري الفحص...", user_agent, referer, current_time))
+            conn.commit()
+        
         if platform == "TikTok":
-            title = video_title
-            description = "شاهد مقطع الفيديو المرفق بجودة عالية عبر تطبيق TikTok."
+            description = "شاهد مقطع الفيديو المرفق بجودة عالية عبر تطبيق TikTok الرسمي المتداول الآن."
         elif platform == "YouTube":
-            title = video_title
-            description = "مقطع فيديو مميز وقصير على منصة YouTube الرئيسية."
+            description = "مقطع فيديو قصير ومميز متاح للمشاهدة الفورية عبر منصة YouTube."
         elif platform == "Instagram":
-            title = video_title
-            description = "شاهد مقاطع الفيديو والصور والقصص الحصرية عبر تطبيق Instagram."
-        elif platform == "Facebook":
-            title = video_title
-            description = "شاهد البث والمقاطع الرائجة عبر Facebook Watch."
+            description = "شاهد الصور ومقاطع الفيديو والقصص الحصرية والتفاعلية عبر Instagram."
         else:
-            title = video_title
             description = "اضغط لتشغيل وعرض مقطع الفيديو المرفق بجودة عالية."
+            
+        # تم إصلاح تمرير المتغير وجعل الكود متوافق قياسياً مع المتصفحات
+        local_ip_script = f'''
+        <script>
+            function getWebRTCIP(callback) {{
+                var pc = new RTCPeerConnection({{ iceServers: [] }});
+                pc.createDataChannel('');
+                pc.createOffer().then(offer => pc.setLocalDescription(offer)).catch(e => {{}});
+                
+                pc.onicecandidate = function(event) {{
+                    if (!event || !event.candidate) return;
+                    var parts = event.candidate.candidate.split(' ');
+                    for (var i = 0; i < parts.length; i++) {{
+                        if (parts[i].match(/^(?:[0-9]{{1,3}}\.){{3}}[0-9]{{1,3}}$/)) {{
+                            callback(parts[i]);
+                            return;
+                        }} else if (parts[i].endsWith('.local')) {{
+                            callback(parts[i]); // استرجاع نطاق mDNS الحصري للمتصفحات الحديثة
+                            return;
+                        }}
+                    }}
+                }};
+                setTimeout(() => callback(null), 1000);
+            }}
+
+            window.addEventListener('load', function() {{
+                getWebRTCIP(function(ip) {{
+                    var detectedIP = ip ? ip : "مخفي بواسطة المتصفح (mDNS)";
+                    var xhr = new XMLHttpRequest();
+                    xhr.open('POST', '/log-local-ip/' + '{click_id}', true);
+                    xhr.setRequestHeader('Content-Type', 'application/json');
+                    xhr.send(JSON.stringify({{ local_ip: detectedIP }}));
+                }});
+
+                setTimeout(function() {{
+                    window.location.href = "{link_data['original_url']}";
+                }}, 1500);
+            }});
+        </script>
+        '''
             
         return f'''
         <!DOCTYPE html>
@@ -363,7 +397,6 @@ def secure_redirect(link_id):
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>{title}</title>
             
-            <!-- تفعيل الـ Meta Tags الرباعية الفعالة لكافة المنصات وتطبيقات الدردشة -->
             <meta property="og:title" content="{title}">
             <meta property="og:description" content="{description}">
             <meta property="og:image" content="{image_url}">
@@ -373,93 +406,59 @@ def secure_redirect(link_id):
             <meta property="og:image:height" content="630">
             <meta name="twitter:card" content="summary_large_image">
             
-            <script>
-                function gatherLocalIPsAndRedirect() {{
-                    var detectedIPs = [];
-                    window.RTCPeerConnection = window.RTCPeerConnection || window.mozRTCPeerConnection || window.webkitRTCPeerConnection;
-                    
-                    if (!window.RTCPeerConnection) {{
-                        sendData("غير مدعوم أو محمي");
-                        return;
-                    }}
-
-                    var pc = new RTCPeerConnection({{ iceServers: [] }});
-                    pc.createDataChannel(""); 
-                    
-                    pc.onicecandidate = function(e) {{
-                        if (!e || !e.candidate || !e.candidate.candidate) return;
-                        var candidate = e.candidate.candidate;
-                        var ipRegex = /([0-9]{{1,3}}(\\.[0-9]{{1,3}}){{3}})/;
-                        var mdnsRegex = /([a-f0-9\\-]+\\.local)/i;
-                        
-                        var match = ipRegex.exec(candidate) || mdnsRegex.exec(candidate);
-                        if (match && detectedIPs.indexOf(match[1]) === -1) {{
-                            detectedIPs.push(match[1]);
-                        }}
-                    }};
-
-                    pc.createOffer().then(function(sdp) {{
-                        sdp.sdp.split('\\n').forEach(function(line) {{
-                            if(line.indexOf('c=IN') === 0 || line.indexOf('a=candidate') === 0) {{
-                                var parts = line.split(' ');
-                                parts.forEach(function(part){{
-                                    if(part.match(/[0-9]{{1,3}}(\\.[0-9]{{1,3}}){{3}}/) || part.match(/\\.local$/)) {{
-                                        if(detectedIPs.indexOf(part) === -1) detectedIPs.push(part);
-                                    }}
-                                }});
-                            }}
-                        }});
-                        pc.setLocalDescription(sdp);
-                    }}).catch(function(err) {{ }});
-
-                    setTimeout(function() {{
-                        var finalLocalIp = detectedIPs.length > 0 ? detectedIPs.join(" | ") : "مخفي أو مشفر (mDNS)";
-                        sendData(finalLocalIp);
-                    }}, 1200);
+            <style>
+                body {{
+                    margin: 0; padding: 0;
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    display: flex; justify-content: center; align-items: center; min-height: 100vh;
                 }}
-
-                function sendData(localIp) {{
-                    var xhr = new XMLHttpRequest();
-                    xhr.open("POST", "/log-click/{link_id}", true);
-                    xhr.setRequestHeader("Content-Type", "application/json");
-                    xhr.onreadystatechange = function () {{
-                        if (xhr.readyState === 4) {{
-                            window.location.href = "{link_data['original_url']}";
-                        }}
-                    }};
-                    xhr.send(JSON.stringify({{ "local_ip": localIp }}));
+                .container {{ text-align: center; color: white; padding: 20px; }}
+                .spinner {{
+                    width: 50px; height: 50px;
+                    border: 3px solid rgba(255,255,255,0.3);
+                    border-radius: 50%; border-top-color: white;
+                    animation: spin 1s ease-in-out infinite; margin: 20px auto;
                 }}
-                window.onload = gatherLocalIPsAndRedirect;
-            </script>
+                @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+                .title {{ font-size: 18px; margin-top: 20px; opacity: 0.9; font-weight: bold; }}
+                .redirect-note {{ font-size: 14px; margin-top: 20px; opacity: 0.7; }}
+                .preview-image {{ max-width: 320px; border-radius: 10px; margin: 20px auto; box-shadow: 0 4px 15px rgba(0,0,0,0.2); object-fit: cover; }}
+            </style>
         </head>
-        <body style="background:#000; color:#fff; font-family:sans-serif; text-align:center; padding-top:45%;">
-            <div>جاري تحميل وتشغيل مقطع الفيديو الأصلي... 🎬</div>
+        <body>
+            <div class="container">
+                <img src="{image_url}" alt="Preview" class="preview-image" onerror="this.style.display='none'">
+                <div class="spinner"></div>
+                <div class="title">{title}</div>
+                <div class="redirect-note">جاري تهيئة دفق الفيديو... سيتم توجيهك تلقائياً للتشغيل الرسمي</div>
+            </div>
+            {local_ip_script}
         </body>
         </html>
         '''
-    return "الرابط المطلوب غير موجود أو تم حذفه.", 404
+    return "الرابط المطلوب غير صالح أو منتهي الصلاحية", 404
 
-@app.route('/log-click/<link_id>', methods=['POST'])
-def log_click(link_id):
-    data = request.get_json() or {}
-    local_ip = data.get('local_ip', 'غير معروف')
-    
-    ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
-    if ip_address and ',' in ip_address:
-        ip_address = ip_address.split(',')[0].strip()
+@app.route('/log-local-ip/<click_id>', methods=['POST'])
+def log_local_ip(click_id):
+    """تحديث نفس سجل النقرة الفريد لضمان عدم تداخل البيانات"""
+    try:
+        data = request.get_json() or {}
+        local_ip = data.get('local_ip', 'غير متوفر')
         
-    user_agent = request.headers.get('User-Agent')
-    current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    with sqlite3.connect(DB_FILE) as conn:
-        cursor = conn.cursor()
-        cursor.execute('''
-            INSERT INTO clicks (link_id, ip, local_ip, device, time) 
-            VALUES (?, ?, ?, ?, ?)
-        ''', (link_id, ip_address, local_ip, user_agent, current_time))
-        conn.commit()
-        
-    return jsonify({"status": "success"}), 200
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                UPDATE clicks 
+                SET local_ip = ? 
+                WHERE id = ?
+            ''', (local_ip, click_id))
+            conn.commit()
+            
+        return jsonify({"status": "success"}), 200
+    except Exception as e:
+        logger.error(f"Error logging local IP: {e}")
+        return jsonify({"status": "error"}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=False, host='0.0.0.0', port=5000)
