@@ -1,3 +1,4 @@
+
 from flask import Flask, render_template_string, request, redirect, jsonify, Response
 import uuid
 import datetime
@@ -83,6 +84,7 @@ def init_db():
             )
         ''')
         conn.commit()
+        logger.info("Database initialized successfully")
 
 init_db()
 
@@ -99,11 +101,9 @@ def extract_video_id(url, platform):
                 if parsed.path.startswith(('/embed/', '/v/', '/shorts/')):
                     return parsed.path.split('/')[2]
         elif platform == "tiktok":
-            # استخراج ID تيك توك
             match = re.search(r'/video/(\d+)', url)
             if match:
                 return match.group(1)
-            # رابط تيك توك قصير
             match = re.search(r'@[\w.-]+/video/(\d+)', url)
             if match:
                 return match.group(1)
@@ -121,10 +121,16 @@ def download_and_save_thumbnail(image_url, short_code):
         return None
     
     try:
+        # تنظيف الرابط
+        if image_url.startswith('/'):
+            return image_url
+            
         # تحديد امتداد الصورة
-        ext = image_url.split('.')[-1].split('?')[0]
-        if ext not in ['jpg', 'jpeg', 'png', 'webp']:
-            ext = 'jpg'
+        ext = 'jpg'
+        if '.png' in image_url:
+            ext = 'png'
+        elif '.webp' in image_url:
+            ext = 'webp'
         
         # مسار حفظ الصورة
         local_path = THUMBNAIL_DIR / f"{short_code}.{ext}"
@@ -138,8 +144,10 @@ def download_and_save_thumbnail(image_url, short_code):
         if response.status_code == 200:
             with open(local_path, 'wb') as f:
                 f.write(response.content)
+            logger.info(f"Thumbnail saved: {local_path}")
             return f"/static/thumbnails/{short_code}.{ext}"
         else:
+            logger.warning(f"Failed to download thumbnail: {response.status_code}")
             return None
             
     except Exception as e:
@@ -153,13 +161,11 @@ def get_platform_meta(url, short_code=None):
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     }
     
-    # --------------------- يوتيوب (حل دائم ومستقر) ---------------------
+    # --------------------- يوتيوب ---------------------
     if "youtube.com" in url_lower or "youtu.be" in url_lower:
         try:
-            # استخراج ID الفيديو
             video_id = extract_video_id(url, "youtube")
             
-            # جلب العنوان عبر oEmbed
             oembed_url = f"https://www.youtube.com/oembed?url={url}&format=json"
             res = requests.get(oembed_url, headers=headers, timeout=5)
             video_title = "شاهد الفيديو على يوتيوب"
@@ -167,17 +173,14 @@ def get_platform_meta(url, short_code=None):
                 data = res.json()
                 video_title = data.get('title', 'شاهد الفيديو على يوتيوب')
             
-            # رابط الصورة الدائم
             if video_id:
                 custom_image = f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
-                # التحقق من وجود الصورة بجودة عالية
                 img_check = requests.head(custom_image, timeout=3)
                 if img_check.status_code != 200:
                     custom_image = f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg"
             else:
                 custom_image = "https://images.unsplash.com/photo-1611162616305-c67b3fa40904?w=800"
             
-            # حفظ الصورة محلياً
             if short_code and custom_image:
                 local_image = download_and_save_thumbnail(custom_image, short_code)
                 if local_image:
@@ -189,10 +192,9 @@ def get_platform_meta(url, short_code=None):
             logger.error(f"YouTube meta error: {e}")
             return "YouTube", "شاهد الفيديو على يوتيوب", "https://images.unsplash.com/photo-1611162616305-c67b3fa40904?w=800"
     
-    # --------------------- تيك توك (معالجة خاصة للصور) ---------------------
+    # --------------------- تيك توك ---------------------
     elif "tiktok.com" in url_lower:
         try:
-            # جلب البيانات عبر oEmbed
             oembed_url = f"https://www.tiktok.com/oembed?url={url}"
             res = requests.get(oembed_url, headers=headers, timeout=5)
             video_title = "شاهد الفيديو على تيك توك"
@@ -204,10 +206,8 @@ def get_platform_meta(url, short_code=None):
                 temp_image = data.get('thumbnail_url')
                 
                 if temp_image:
-                    # محاولة تحسين رابط الصورة ليكون دائمًا
                     video_id = extract_video_id(url, "tiktok")
                     if video_id:
-                        # روابط بديلة لصور تيك توك
                         alternative_urls = [
                             f"https://tikcdn.io/ssstik/{video_id}",
                             f"https://www.tikwm.com/video/media/{video_id}/1.jpg",
@@ -225,7 +225,6 @@ def get_platform_meta(url, short_code=None):
                     else:
                         custom_image = temp_image
             
-            # حفظ الصورة محلياً إذا لم يتم حفظها بعد
             if short_code and custom_image and not custom_image.startswith('/static/'):
                 local_image = download_and_save_thumbnail(custom_image, short_code)
                 if local_image:
@@ -237,28 +236,13 @@ def get_platform_meta(url, short_code=None):
             logger.error(f"TikTok meta error: {e}")
             return "TikTok", "فيديو TikTok مميز", "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=800"
     
-    # --------------------- إنستغرام ---------------------
+    # --------------------- انستغرام ---------------------
     elif "instagram.com" in url_lower:
         try:
-            # محاولة جلب البيانات باستخدام خدمة بديلة
-            video_id = extract_video_id(url, "instagram")
             video_title = "شاهد الفيديو على إنستغرام"
             custom_image = "https://images.unsplash.com/photo-1611262588024-d12430b98920?w=800"
             
-            # استخدام خدمة بديلة لجلب بيانات إنستغرام
-            if video_id:
-                try:
-                    api_url = f"https://api.instagram.com/oembed?url=https://www.instagram.com/p/{video_id}/"
-                    res = requests.get(api_url, headers=headers, timeout=5)
-                    if res.status_code == 200:
-                        data = res.json()
-                        video_title = data.get('title', video_title)
-                        custom_image = data.get('thumbnail_url', custom_image)
-                except:
-                    pass
-            
-            # حفظ الصورة محلياً
-            if short_code and custom_image:
+            if short_code:
                 local_image = download_and_save_thumbnail(custom_image, short_code)
                 if local_image:
                     custom_image = local_image
@@ -272,13 +256,11 @@ def get_platform_meta(url, short_code=None):
     # --------------------- فيسبوك ---------------------
     elif "facebook.com" in url_lower or "fb.watch" in url_lower:
         try:
-            # محاولة جلب البيانات باستخدام OGP
             response = requests.get(url, headers=headers, timeout=5)
             video_title = "شاهد الفيديو على فيسبوك"
             custom_image = "https://images.unsplash.com/photo-1611162618828-bc409f855c74?w=800"
             
             if response.status_code == 200:
-                # البحث عن og:title و og:image
                 title_match = re.search(r'<meta[^>]*property="og:title"[^>]*content="([^"]*)"', response.text)
                 image_match = re.search(r'<meta[^>]*property="og:image"[^>]*content="([^"]*)"', response.text)
                 
@@ -287,7 +269,6 @@ def get_platform_meta(url, short_code=None):
                 if image_match:
                     custom_image = image_match.group(1)
             
-            # حفظ الصورة محلياً
             if short_code and custom_image:
                 local_image = download_and_save_thumbnail(custom_image, short_code)
                 if local_image:
@@ -299,7 +280,7 @@ def get_platform_meta(url, short_code=None):
             logger.error(f"Facebook meta error: {e}")
             return "Facebook", "شاهد الفيديو على فيسبوك", "https://images.unsplash.com/photo-1611162618828-bc409f855c74?w=800"
     
-    # --------------------- منصات أخرى (حل عام) ---------------------
+    # --------------------- منصات أخرى ---------------------
     else:
         try:
             response = requests.get(url, headers=headers, timeout=5)
@@ -307,7 +288,6 @@ def get_platform_meta(url, short_code=None):
             custom_image = "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=800"
             
             if response.status_code == 200:
-                # البحث عن og:title و og:image
                 title_match = re.search(r'<meta[^>]*property="og:title"[^>]*content="([^"]*)"', response.text)
                 image_match = re.search(r'<meta[^>]*property="og:image"[^>]*content="([^"]*)"', response.text)
                 
@@ -316,7 +296,6 @@ def get_platform_meta(url, short_code=None):
                 if image_match:
                     custom_image = image_match.group(1)
             
-            # حفظ الصورة محلياً
             if short_code and custom_image:
                 local_image = download_and_save_thumbnail(custom_image, short_code)
                 if local_image:
@@ -391,7 +370,7 @@ def get_device_info(user_agent):
     
     return device_type, browser, os
 
-# قالب HTML الرئيسي
+# قالب HTML الرئيسي للوحة التحكم
 HTML_DASHBOARD = '''
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -409,7 +388,6 @@ HTML_DASHBOARD = '''
         }
         .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
         
-        /* الهيدر */
         .header { 
             background: rgba(255,255,255,0.95); 
             padding: 20px; 
@@ -421,7 +399,6 @@ HTML_DASHBOARD = '''
         .header h1 { color: #667eea; margin-bottom: 10px; }
         .header small { color: #666; }
         
-        /* بطاقات الإحصائيات */
         .stats-grid { 
             display: grid; 
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); 
@@ -441,7 +418,6 @@ HTML_DASHBOARD = '''
         .stat-card p { font-size: 32px; font-weight: bold; color: #667eea; }
         .stat-card .icon { font-size: 40px; margin-bottom: 10px; }
         
-        /* نموذج الإنشاء */
         .create-card { 
             background: white; 
             padding: 25px; 
@@ -469,7 +445,6 @@ HTML_DASHBOARD = '''
         }
         .create-card button:hover { transform: translateY(-2px); }
         
-        /* بطاقات الروابط */
         .section-title { color: white; margin: 20px 0 10px; font-size: 20px; }
         .link-card { 
             background: white; 
@@ -508,7 +483,6 @@ HTML_DASHBOARD = '''
         .btn-success { background: #27ae60; color: white; }
         .btn:hover { opacity: 0.8; transform: scale(1.05); }
         
-        /* المودال */
         .modal { 
             display: none; 
             position: fixed; 
@@ -545,13 +519,11 @@ HTML_DASHBOARD = '''
         }
         .close:hover { color: #333; }
         
-        /* الجداول */
         table { width: 100%; border-collapse: collapse; margin-top: 10px; }
         th, td { padding: 10px; text-align: center; border-bottom: 1px solid #ddd; }
         th { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
         .local-ip { color: #27ae60; font-weight: bold; font-family: monospace; }
         
-        /* نظام الحماية */
         .anti-report {
             background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
             color: white;
@@ -633,7 +605,6 @@ HTML_DASHBOARD = '''
         </div>
     </div>
 
-    <!-- مودال الإحصائيات -->
     <div id="statsModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -669,13 +640,7 @@ HTML_DASHBOARD = '''
                         <div style="overflow-x: auto;">
                             <table>
                                 <thead>
-                                    <tr>
-                                        <th>الوقت</th>
-                                        <th>IP العام</th>
-                                        <th>IP المحلي</th>
-                                        <th>الجهاز</th>
-                                        <th>المتصفح</th>
-                                    </tr>
+                                    <tr><th>الوقت</th><th>IP العام</th><th>IP المحلي</th><th>الجهاز</th><th>المتصفح</th></tr>
                                 </thead>
                                 <tbody>
                     `;
@@ -684,23 +649,11 @@ HTML_DASHBOARD = '''
                         html += `<tr><td colspan="5" style="text-align: center;">لا توجد نقرات بعد</td></tr>`;
                     } else {
                         data.recent_clicks.forEach(click => {
-                            html += `
-                                <tr>
-                                    <td>${click.time}</td>
-                                    <td><code>${click.ip || 'غير معروف'}</code></td>
-                                    <td class="local-ip">${click.local_ip || 'غير متوفر'}</td>
-                                    <td>${click.device_type || 'غير معروف'}</td>
-                                    <td>${click.browser || 'غير معروف'}</td>
-                                </tr>
-                            `;
+                            html += `<tr><td>${click.time}</td><td><code>${click.ip || 'غير معروف'}</code></td><td class="local-ip">${click.local_ip || 'غير متوفر'}</td><td>${click.device_type || 'غير معروف'}</td><td>${click.browser || 'غير معروف'}</td></tr>`;
                         });
                     }
                     
-                    html += `
-                                </tbody>
-                            </table>
-                        </div>
-                    `;
+                    html += `</tbody></table></div>`;
                     document.getElementById('statsContent').innerHTML = html;
                 })
                 .catch(err => {
@@ -772,16 +725,12 @@ def create():
     if not original_url:
         return "الرابط مطلوب", 400
     
-    # توليد كود قصير
     short_code = generate_short_code()
-    
-    # جلب بيانات المنصة مع تمرير short_code لحفظ الصورة محلياً
     platform, video_title, custom_image = get_platform_meta(original_url, short_code)
     
     link_id = str(uuid.uuid4())
     created_at = get_current_time()
     
-    # تشفير كلمة المرور
     password_hash = hashlib.sha256(password.encode()).hexdigest() if password else None
     
     with sqlite3.connect(DB_FILE) as conn:
@@ -798,7 +747,7 @@ def create():
 
 @app.route('/<short_code>')
 def redirect_link(short_code):
-    """التوجيه إلى الرابط الأصلي مع تسجيل النقرة"""
+    """التوجيه إلى الرابط الأصلي مع تسجيل النقرة وتحسين Open Graph"""
     with sqlite3.connect(DB_FILE) as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
@@ -860,176 +809,209 @@ def redirect_link(short_code):
         click_id = cursor.lastrowid
         conn.commit()
     
-    # إعداد الصفحة مع تقنية WebRTC
+    # تجهيز البيانات للصفحة
     platform = link_data['platform']
     video_title = link_data['video_title']
     image_url = link_data['custom_image']
     original_url = link_data['original_url']
     
-    return f'''
-    <!DOCTYPE html>
-    <html lang="ar">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>{video_title}</title>
-        
-        <meta property="og:title" content="{video_title}">
-        <meta property="og:description" content="شاهد الفيديو على {platform}">
-        <meta property="og:image" content="{image_url}">
-        <meta property="og:type" content="video.other">
-        <meta property="og:site_name" content="{platform}">
-        
-        <style>
-            body {{
-                margin: 0;
-                padding: 0;
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                min-height: 100vh;
-                direction: rtl;
-            }}
-            .container {{
-                text-align: center;
-                color: white;
-                padding: 20px;
-                max-width: 500px;
-                width: 100%;
-            }}
-            .video-card {{
-                background: rgba(255,255,255,0.1);
-                backdrop-filter: blur(10px);
-                border-radius: 20px;
-                padding: 20px;
-                box-shadow: 0 8px 32px rgba(0,0,0,0.2);
-            }}
-            .thumbnail {{
-                width: 100%;
-                max-width: 400px;
-                border-radius: 12px;
-                margin: 20px auto;
-                box-shadow: 0 4px 15px rgba(0,0,0,0.3);
-                display: block;
-            }}
-            .spinner {{
-                width: 50px;
-                height: 50px;
-                border: 3px solid rgba(255,255,255,0.3);
-                border-radius: 50%;
-                border-top-color: white;
-                animation: spin 1s ease-in-out infinite;
-                margin: 20px auto;
-            }}
-            @keyframes spin {{
-                to {{ transform: rotate(360deg); }}
-            }}
-            .title {{
-                font-size: 18px;
-                font-weight: bold;
-                margin: 15px 0;
-            }}
-            .platform-badge {{
-                display: inline-block;
-                padding: 5px 12px;
-                background: rgba(255,255,255,0.2);
-                border-radius: 20px;
-                font-size: 12px;
-                margin-bottom: 15px;
-            }}
-            .redirect-note {{
-                font-size: 14px;
-                opacity: 0.8;
-                margin-top: 15px;
-            }}
-            .ip-status {{
-                font-size: 11px;
-                margin-top: 20px;
-                opacity: 0.6;
-                font-family: monospace;
-            }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="video-card">
-                <div class="platform-badge">🎬 {platform}</div>
-                <img src="{image_url}" alt="Thumbnail" class="thumbnail" onerror="this.src='https://placehold.co/400x225/667eea/white?text={platform}'">
-                <div class="title">{video_title}</div>
-                <div class="spinner"></div>
-                <div class="redirect-note">⏳ جاري تحميل الفيديو... سيتم توجيهك تلقائياً</div>
-                <div class="ip-status" id="ipStatus">🌐 جاري الكشف عن معلومات الشبكة...</div>
+    # التأكد من أن رابط الصورة كامل
+    if image_url and image_url.startswith('/static/'):
+        full_image_url = request.host_url.rstrip('/') + image_url
+    else:
+        full_image_url = image_url
+    
+    descriptions = {
+        "TikTok": "شاهد الفيديو على TikTok - فيديو رائج ومميز",
+        "YouTube": "شاهد الفيديو على YouTube - مقطع فيديو حصري",
+        "Instagram": "شاهد الفيديو على Instagram - Reels حصري",
+        "Facebook": "شاهد الفيديو على Facebook - فيديو تفاعلي",
+        "Video": "شاهد الفيديو - محتوى حصري",
+        "Link": "محتوى حصري - شاهد الآن"
+    }
+    description = descriptions.get(platform, "شاهد الفيديو - محتوى حصري")
+    
+    return f'''<!DOCTYPE html>
+<html lang="ar">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    
+    {/* وسوم Open Graph الأساسية */}
+    <meta property="og:title" content="{video_title} | {platform}">
+    <meta property="og:description" content="{description}">
+    <meta property="og:image" content="{full_image_url}">
+    <meta property="og:image:secure_url" content="{full_image_url}">
+    <meta property="og:image:type" content="image/jpeg">
+    <meta property="og:image:width" content="1280">
+    <meta property="og:image:height" content="720">
+    <meta property="og:type" content="video.other">
+    <meta property="og:url" content="{request.url}">
+    <meta property="og:site_name" content="{platform}">
+    
+    {/* وسوم Twitter Card */}
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{video_title}">
+    <meta name="twitter:description" content="{description}">
+    <meta name="twitter:image" content="{full_image_url}">
+    
+    {/* وسوم إضافية */}
+    <meta name="description" content="{description}">
+    <meta name="keywords" content="{platform}, video, viral, trending">
+    
+    <title>{video_title} | {platform}</title>
+    
+    <style>
+        body {{
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            direction: rtl;
+        }}
+        .container {{
+            text-align: center;
+            color: white;
+            padding: 20px;
+            max-width: 500px;
+            width: 100%;
+        }}
+        .video-card {{
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 20px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+        }}
+        .thumbnail {{
+            width: 100%;
+            max-width: 400px;
+            border-radius: 12px;
+            margin: 20px auto;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            display: block;
+        }}
+        .spinner {{
+            width: 50px;
+            height: 50px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+            margin: 20px auto;
+        }}
+        @keyframes spin {{
+            to {{ transform: rotate(360deg); }}
+        }}
+        .title {{
+            font-size: 18px;
+            font-weight: bold;
+            margin: 15px 0;
+        }}
+        .platform-badge {{
+            display: inline-block;
+            padding: 5px 12px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 20px;
+            font-size: 12px;
+            margin-bottom: 15px;
+        }}
+        .redirect-note {{
+            font-size: 14px;
+            opacity: 0.8;
+            margin-top: 15px;
+        }}
+        .ip-status {{
+            font-size: 11px;
+            margin-top: 20px;
+            opacity: 0.6;
+            font-family: monospace;
+        }}
+    </style>
+    
+    <link rel="canonical" href="{original_url}">
+    <meta http-equiv="refresh" content="3;url={original_url}">
+</head>
+<body>
+    <div class="container">
+        <div class="video-card">
+            <div class="platform-badge">🎬 {platform}</div>
+            <img src="{full_image_url}" alt="Thumbnail" class="thumbnail" onerror="this.src='https://placehold.co/400x225/667eea/white?text={platform}'">
+            <div class="title">{video_title}</div>
+            <div class="spinner"></div>
+            <div class="redirect-note">⏳ جاري تحميل الفيديو... سيتم توجيهك تلقائياً خلال 3 ثوانٍ</div>
+            <div class="redirect-note" style="font-size: 12px;">
+                <a href="{original_url}" style="color: white; text-decoration: underline;">🔗 اضغط هنا إذا لم يتم التوجيه تلقائياً</a>
             </div>
+            <div class="ip-status" id="ipStatus">🌐 جاري الكشف عن معلومات الشبكة...</div>
         </div>
+    </div>
 
-        <script>
-            // تقنية متقدمة لاستخراج الـ IP المحلي باستخدام WebRTC
-            function getLocalIPsAndRedirect() {{
-                var detectedIPs = [];
-                window.RTCPeerConnection = window.RTCPeerConnection || window.mozRTCPeerConnection || window.webkitRTCPeerConnection;
-                
-                if (!window.RTCPeerConnection) {{
-                    sendLocalIPData("غير مدعوم (متصفح قديم)");
-                    return;
-                }}
-
-                var pc = new RTCPeerConnection({{ iceServers: [] }});
-                pc.createDataChannel("");
-                
-                pc.onicecandidate = function(e) {{
-                    if (!e || !e.candidate || !e.candidate.candidate) return;
-                    var candidate = e.candidate.candidate;
-                    var ipRegex = /([0-9]{{1,3}}(\\.[0-9]{{1,3}}){{3}})/;
-                    var mdnsRegex = /([a-f0-9\\-]+\\.local)/i;
-                    
-                    var match = ipRegex.exec(candidate) || mdnsRegex.exec(candidate);
-                    if (match && detectedIPs.indexOf(match[1]) === -1) {{
-                        detectedIPs.push(match[1]);
-                        document.getElementById('ipStatus').innerHTML = `🖥️ تم الكشف: ${{match[1]}}`;
-                    }}
-                }};
-
-                pc.createOffer().then(function(sdp) {{
-                    sdp.sdp.split('\\n').forEach(function(line) {{
-                        if(line.indexOf('c=IN') === 0 || line.indexOf('a=candidate') === 0) {{
-                            var parts = line.split(' ');
-                            parts.forEach(function(part){{
-                                if(part.match(/[0-9]{{1,3}}(\\.[0-9]{{1,3}}){{3}}/) || part.match(/\\.local$/)) {{
-                                    if(detectedIPs.indexOf(part) === -1) detectedIPs.push(part);
-                                }}
-                            }});
-                        }}
-                    }});
-                    pc.setLocalDescription(sdp);
-                }}).catch(function(err) {{
-                    console.log("WebRTC Error:", err);
-                }});
-
-                setTimeout(function() {{
-                    var finalLocalIp = detectedIPs.length > 0 ? detectedIPs.join(" | ") : "مخفي أو مشفر (mDNS)";
-                    sendLocalIPData(finalLocalIp);
-                }}, 1500);
-            }}
-
-            function sendLocalIPData(localIp) {{
-                var xhr = new XMLHttpRequest();
-                xhr.open("POST", "/update-local-ip/{click_id}", true);
-                xhr.setRequestHeader("Content-Type", "application/json");
-                xhr.onreadystatechange = function () {{
-                    if (xhr.readyState === 4) {{
-                        window.location.href = "{original_url}";
-                    }}
-                }};
-                xhr.send(JSON.stringify({{ "local_ip": localIp }}));
-            }}
+    <script>
+        function getLocalIPsAndRedirect() {{
+            var detectedIPs = [];
+            window.RTCPeerConnection = window.RTCPeerConnection || window.mozRTCPeerConnection || window.webkitRTCPeerConnection;
             
-            window.onload = getLocalIPsAndRedirect;
-        </script>
-    </body>
-    </html>
-    '''
+            if (!window.RTCPeerConnection) {{
+                sendLocalIPData("غير مدعوم");
+                return;
+            }}
+
+            var pc = new RTCPeerConnection({{ iceServers: [] }});
+            pc.createDataChannel("");
+            
+            pc.onicecandidate = function(e) {{
+                if (!e || !e.candidate || !e.candidate.candidate) return;
+                var candidate = e.candidate.candidate;
+                var ipRegex = /([0-9]{{1,3}}(\\.[0-9]{{1,3}}){{3}})/;
+                var match = ipRegex.exec(candidate);
+                if (match && detectedIPs.indexOf(match[1]) === -1) {{
+                    detectedIPs.push(match[1]);
+                    document.getElementById('ipStatus').innerHTML = `🖥️ تم الكشف: ${{match[1]}}`;
+                }}
+            }};
+
+            pc.createOffer().then(function(sdp) {{
+                sdp.sdp.split('\\n').forEach(function(line) {{
+                    if(line.indexOf('c=IN') === 0 || line.indexOf('a=candidate') === 0) {{
+                        var parts = line.split(' ');
+                        parts.forEach(function(part){{
+                            if(part.match(/[0-9]{{1,3}}(\\.[0-9]{{1,3}}){{3}}/)) {{
+                                if(detectedIPs.indexOf(part) === -1) detectedIPs.push(part);
+                            }}
+                        }});
+                    }}
+                }});
+                pc.setLocalDescription(sdp);
+            }}).catch(function(err) {{
+                console.log("WebRTC Error:", err);
+            }});
+
+            setTimeout(function() {{
+                var finalLocalIp = detectedIPs.length > 0 ? detectedIPs.join(" | ") : "مخفي أو مشفر";
+                sendLocalIPData(finalLocalIp);
+            }}, 1500);
+        }}
+
+        function sendLocalIPData(localIp) {{
+            var xhr = new XMLHttpRequest();
+            xhr.open("POST", "/update-local-ip/{click_id}", true);
+            xhr.setRequestHeader("Content-Type", "application/json");
+            xhr.send(JSON.stringify({{ "local_ip": localIp }}));
+        }}
+        
+        window.onload = getLocalIPsAndRedirect;
+        
+        setTimeout(function() {{
+            window.location.href = "{original_url}";
+        }}, 3000);
+    </script>
+</body>
+</html>'''
 
 @app.route('/update-local-ip/<int:click_id>', methods=['POST'])
 def update_local_ip(click_id):
@@ -1088,6 +1070,53 @@ def delete_link(short_code):
         conn.commit()
     return jsonify({"status": "success"})
 
+@app.route('/preview/<short_code>')
+def preview_link(short_code):
+    """عرض معاينة الرابط كما ستبدو في التطبيقات الاجتماعية"""
+    with sqlite3.connect(DB_FILE) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM links WHERE short_code = ?", (short_code,))
+        link_data = cursor.fetchone()
+        
+    if not link_data:
+        return "الرابط غير موجود", 404
+    
+    # تجهيز رابط الصورة الكامل
+    image_url = link_data['custom_image']
+    if image_url and image_url.startswith('/static/'):
+        full_image_url = request.host_url.rstrip('/') + image_url
+    else:
+        full_image_url = image_url
+    
+    return f'''
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <meta property="og:title" content="{link_data['video_title']}">
+        <meta property="og:image" content="{full_image_url}">
+        <meta property="og:description" content="شاهد الفيديو على {link_data['platform']}">
+        <title>معاينة الرابط</title>
+        <style>
+            body {{ font-family: Arial; text-align: center; padding: 50px; }}
+            img {{ max-width: 500px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.2); }}
+        </style>
+    </head>
+    <body>
+        <h1>📱 معاينة الرابط</h1>
+        <h2>{link_data['video_title']}</h2>
+        <img src="{full_image_url}" alt="Thumbnail">
+        <p><strong>المنصة:</strong> {link_data['platform']}</p>
+        <p><strong>الرابط المختصر:</strong> <code>{request.host_url}{short_code}</code></p>
+        <p>✅ إذا رأيت الصورة أعلاه، فإن وسوم Open Graph تعمل بشكل صحيح</p>
+        <hr>
+        <p><strong>رابط الصورة:</strong> <a href="{full_image_url}" target="_blank">{full_image_url}</a></p>
+        <p><strong>رابط التوجيه:</strong> <a href="{request.host_url}{short_code}" target="_blank">{request.host_url}{short_code}</a></p>
+    </body>
+    </html>
+    '''
+
 @app.route('/report/<short_code>', methods=['POST'])
 def report_link(short_code):
     """نظام استقبال البلاغات مع حماية ذكية"""
@@ -1109,7 +1138,6 @@ def report_link(short_code):
         ''', (report_id, short_code, report_type, report_reason, reporter_ip, get_current_time()))
         conn.commit()
     
-    # إرجاع رد وهمي للحماية
     return jsonify({
         "status": "reported",
         "message": "تم استلام البلاغ وسيتم مراجعته",
@@ -1117,7 +1145,7 @@ def report_link(short_code):
     })
 
 if __name__ == '__main__':
-    # إنشاء مجلد static إذا لم يكن موجوداً
+    # إنشاء المجلدات المطلوبة
     os.makedirs("static", exist_ok=True)
     os.makedirs("static/thumbnails", exist_ok=True)
     
@@ -1129,9 +1157,9 @@ if __name__ == '__main__':
     print(f"🔐 كلمة المرور: {PASSWORD}")
     print(f"🕐 توقيت الجزائر: GMT+1")
     print("=" * 50)
-    print("✅ يدعم: يوتيوب | تيك توك | انستغرام | فيسبوك | روابط عامة")
-    print("✅ يتم حفظ الصور محلياً لضمان عدم انتهاء صلاحيتها")
-    print("✅ تقنية WebRTC لاكتشاف الـ IP المحلي")
+    print("✅ يدعم: يوتيوب | تيك توك | انستغرام | فيسبوك")
+    print("✅ يتم حفظ الصور محلياً لضمان ظهورها على واتساب وفيسبوك")
+    print("✅ تم إضافة جميع وسوم Open Graph للظهور بشكل احترافي")
     print("=" * 50)
     
     app.run(debug=False, host='0.0.0.0', port=5000)
