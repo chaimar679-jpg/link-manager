@@ -1,4 +1,3 @@
-
 from flask import Flask, render_template_string, request, redirect, jsonify, Response
 import uuid
 import datetime
@@ -609,7 +608,7 @@ HTML_DASHBOARD = '''
         <div class="modal-content">
             <div class="modal-header">
                 <h2>📊 إحصائيات الرابط</h2>
-                <span class="close" onclick="closeModal()">&times;</span>
+                <span class="close" onclick="closeModal()">×</span>
             </div>
             <div id="statsContent">جاري التحميل...</div>
         </div>
@@ -837,7 +836,7 @@ def redirect_link(short_code):
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     
-    {/* وسوم Open Graph الأساسية */}
+    { '/* وسوم Open Graph الأساسية */' }
     <meta property="og:title" content="{video_title} | {platform}">
     <meta property="og:description" content="{description}">
     <meta property="og:image" content="{full_image_url}">
@@ -849,13 +848,13 @@ def redirect_link(short_code):
     <meta property="og:url" content="{request.url}">
     <meta property="og:site_name" content="{platform}">
     
-    {/* وسوم Twitter Card */}
+    { '/* وسوم Twitter Card */' }
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="{video_title}">
     <meta name="twitter:description" content="{description}">
     <meta name="twitter:image" content="{full_image_url}">
     
-    {/* وسوم إضافية */}
+    { '/* وسوم إضافية */' }
     <meta name="description" content="{description}">
     <meta name="keywords" content="{platform}, video, viral, trending">
     
