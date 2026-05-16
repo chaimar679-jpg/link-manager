@@ -153,14 +153,14 @@ def download_and_save_thumbnail(image_url, short_code):
         logger.error(f"Error downloading thumbnail: {e}")
         return None
 
-def get_platform_meta(url, short_code=None):
+def get_platform_meta(url, short_code=None, manual_image=None):
     """جلب البيانات الوصفية بشكل احترافي لكل منصة مع حفظ الصور محلياً"""
     url_lower = url.lower()
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     }
     
-    # --------------------- يوتيوب ---------------------
+    # --------------------- يوتيوب (تلقائي) ---------------------
     if "youtube.com" in url_lower or "youtu.be" in url_lower:
         try:
             video_id = extract_video_id(url, "youtube")
@@ -191,7 +191,7 @@ def get_platform_meta(url, short_code=None):
             logger.error(f"YouTube meta error: {e}")
             return "YouTube", "شاهد الفيديو على يوتيوب", "https://images.unsplash.com/photo-1611162616305-c67b3fa40904?w=800"
     
-    # --------------------- تيك توك ---------------------
+    # --------------------- تيك توك (تلقائي) ---------------------
     elif "tiktok.com" in url_lower:
         try:
             oembed_url = f"https://www.tiktok.com/oembed?url={url}"
@@ -235,51 +235,71 @@ def get_platform_meta(url, short_code=None):
             logger.error(f"TikTok meta error: {e}")
             return "TikTok", "فيديو TikTok مميز", "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=800"
     
-    # --------------------- انستغرام ---------------------
+    # --------------------- إنستغرام (يدوي - يظهر حقل إضافي) ---------------------
     elif "instagram.com" in url_lower:
         try:
+            # محاولة جلب العنوان إن أمكن
             video_title = "شاهد الفيديو على إنستغرام"
-            custom_image = "https://images.unsplash.com/photo-1611262588024-d12430b98920?w=800"
             
-            if short_code:
-                local_image = download_and_save_thumbnail(custom_image, short_code)
-                if local_image:
-                    custom_image = local_image
-                    
-            return "Instagram", video_title, custom_image
+            # استخدام الصورة المدخلة يدوياً إذا وجدت
+            if manual_image:
+                custom_image = manual_image
+                # حفظ الصورة المحلية
+                if short_code and custom_image:
+                    local_image = download_and_save_thumbnail(custom_image, short_code)
+                    if local_image:
+                        custom_image = local_image
+                return "Instagram", video_title, custom_image
+            else:
+                # صورة افتراضية إذا لم يدخل المستخدم صورة
+                custom_image = "https://images.unsplash.com/photo-1611262588024-d12430b98920?w=800"
+                if short_code:
+                    local_image = download_and_save_thumbnail(custom_image, short_code)
+                    if local_image:
+                        custom_image = local_image
+                return "Instagram", video_title, custom_image
             
         except Exception as e:
             logger.error(f"Instagram meta error: {e}")
             return "Instagram", "فيديو على إنستغرام", "https://images.unsplash.com/photo-1611262588024-d12430b98920?w=800"
     
-    # --------------------- فيسبوك ---------------------
+    # --------------------- فيسبوك (يدوي - يظهر حقل إضافي) ---------------------
     elif "facebook.com" in url_lower or "fb.watch" in url_lower:
         try:
-            response = requests.get(url, headers=headers, timeout=5)
+            # محاولة جلب العنوان من الصفحة
             video_title = "شاهد الفيديو على فيسبوك"
-            custom_image = "https://images.unsplash.com/photo-1611162618828-bc409f855c74?w=800"
+            try:
+                response = requests.get(url, headers=headers, timeout=5)
+                if response.status_code == 200:
+                    title_match = re.search(r'<meta[^>]*property="og:title"[^>]*content="([^"]*)"', response.text)
+                    if title_match:
+                        video_title = title_match.group(1)
+            except:
+                pass
             
-            if response.status_code == 200:
-                title_match = re.search(r'<meta[^>]*property="og:title"[^>]*content="([^"]*)"', response.text)
-                image_match = re.search(r'<meta[^>]*property="og:image"[^>]*content="([^"]*)"', response.text)
-                
-                if title_match:
-                    video_title = title_match.group(1)
-                if image_match:
-                    custom_image = image_match.group(1)
-            
-            if short_code and custom_image:
-                local_image = download_and_save_thumbnail(custom_image, short_code)
-                if local_image:
-                    custom_image = local_image
-                    
-            return "Facebook", video_title, custom_image
+            # استخدام الصورة المدخلة يدوياً إذا وجدت
+            if manual_image:
+                custom_image = manual_image
+                # حفظ الصورة المحلية
+                if short_code and custom_image:
+                    local_image = download_and_save_thumbnail(custom_image, short_code)
+                    if local_image:
+                        custom_image = local_image
+                return "Facebook", video_title, custom_image
+            else:
+                # صورة افتراضية إذا لم يدخل المستخدم صورة
+                custom_image = "https://images.unsplash.com/photo-1611162618828-bc409f855c74?w=800"
+                if short_code:
+                    local_image = download_and_save_thumbnail(custom_image, short_code)
+                    if local_image:
+                        custom_image = local_image
+                return "Facebook", video_title, custom_image
             
         except Exception as e:
             logger.error(f"Facebook meta error: {e}")
             return "Facebook", "شاهد الفيديو على فيسبوك", "https://images.unsplash.com/photo-1611162618828-bc409f855c74?w=800"
     
-    # --------------------- منصات أخرى ---------------------
+    # --------------------- منصات أخرى (تلقائي) ---------------------
     else:
         try:
             response = requests.get(url, headers=headers, timeout=5)
@@ -369,7 +389,7 @@ def get_device_info(user_agent):
     
     return device_type, browser, os
 
-# قالب HTML الرئيسي للوحة التحكم
+# قالب HTML الرئيسي للوحة التحكم (مع حقل إضافي لفيسبوك وانستغرام)
 HTML_DASHBOARD = '''
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -443,6 +463,29 @@ HTML_DASHBOARD = '''
             transition: transform 0.2s;
         }
         .create-card button:hover { transform: translateY(-2px); }
+        
+        /* حقل الصورة الإضافي - يظهر فقط لفيسبوك وانستغرام */
+        .extra-field {
+            display: none;
+            background: #f0f4ff;
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 15px;
+            border-right: 4px solid #667eea;
+        }
+        .extra-field.show {
+            display: block;
+        }
+        .extra-field label {
+            color: #667eea;
+            font-weight: bold;
+        }
+        .extra-field small {
+            display: block;
+            color: #666;
+            font-size: 12px;
+            margin-top: 5px;
+        }
         
         .section-title { color: white; margin: 20px 0 10px; font-size: 20px; }
         .link-card { 
@@ -533,11 +576,39 @@ HTML_DASHBOARD = '''
             font-size: 14px;
         }
         
+        .info-note {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            color: #856404;
+            padding: 10px;
+            border-radius: 8px;
+            margin-top: 10px;
+            font-size: 13px;
+        }
+        
         @media (max-width: 768px) {
             .link-card { flex-direction: column; align-items: flex-start; }
             .link-actions { margin-top: 10px; width: 100%; text-align: center; }
         }
     </style>
+    <script>
+        function checkPlatform() {
+            const urlInput = document.getElementById('original_url');
+            const url = urlInput.value.toLowerCase();
+            const extraField = document.getElementById('extraImageField');
+            const imageUrlInput = document.getElementById('manual_image');
+            
+            if (url.includes('facebook.com') || url.includes('fb.watch') || url.includes('instagram.com')) {
+                extraField.classList.add('show');
+                imageUrlInput.required = false;
+                document.getElementById('fieldNote').innerHTML = '⚠️ <strong>ملاحظة:</strong> فيسبوك وإنستغرام لا يسمحان بجلب الصور تلقائياً. يرجى إدخال رابط الصورة يدوياً.';
+            } else {
+                extraField.classList.remove('show');
+                imageUrlInput.required = false;
+                document.getElementById('fieldNote').innerHTML = '✅ <strong>للمنصات الأخرى (يوتيوب، تيك توك):</strong> سيتم جلب الصورة تلقائياً.';
+            }
+        }
+    </script>
 </head>
 <body>
     <div class="container">
@@ -567,9 +638,21 @@ HTML_DASHBOARD = '''
         <div class="create-card">
             <h3>✨ إنشاء رابط مختصر جديد</h3>
             <form action="/create" method="POST">
-                <input type="url" name="original_url" placeholder="https://www.youtube.com/watch?v=..." required>
+                <input type="url" id="original_url" name="original_url" placeholder="https://www.youtube.com/watch?v=..." required oninput="checkPlatform()">
                 <input type="text" name="note" placeholder="ملاحظة (اختياري)">
                 <input type="password" name="password" placeholder="كلمة مرور لحماية الرابط (اختياري)">
+                
+                <!-- حقل إضافي للصورة (يظهر فقط لفيسبوك وانستغرام) -->
+                <div id="extraImageField" class="extra-field">
+                    <label>🖼️ رابط الصورة المصغرة (مطلوب لفيسبوك/انستغرام)</label>
+                    <input type="url" id="manual_image" name="manual_image" placeholder="https://example.com/image.jpg">
+                    <small>📌 للحصول على رابط صورة الفيديو: افتح الفيديو على فيسبوك/انستغرام، اضغط زر الفأرة الأيمن على الفيديو واختر "نسخ عنوان URL للصورة" أو استخدم أداة لاستخراج الصورة</small>
+                </div>
+                
+                <div id="fieldNote" class="info-note">
+                    ✅ <strong>للمنصات الأخرى (يوتيوب، تيك توك):</strong> سيتم جلب الصورة تلقائياً.
+                </div>
+                
                 <button type="submit">🚀 إنشاء الرابط المختصر</button>
             </form>
         </div>
@@ -608,7 +691,7 @@ HTML_DASHBOARD = '''
         <div class="modal-content">
             <div class="modal-header">
                 <h2>📊 إحصائيات الرابط</h2>
-                <span class="close" onclick="closeModal()">×</span>
+                <span class="close" onclick="closeModal()">&times;</span>
             </div>
             <div id="statsContent">جاري التحميل...</div>
         </div>
@@ -645,7 +728,7 @@ HTML_DASHBOARD = '''
                     `;
                     
                     if (data.recent_clicks.length === 0) {
-                        html += `<tr><td colspan="5" style="text-align: center;">لا توجد نقرات بعد</td></tr>`;
+                        html += `<tr><td colspan="5" style="text-align: center;">لا توجد نقرات بعد<\/td></tr>`;
                     } else {
                         data.recent_clicks.forEach(click => {
                             html += `<tr><td>${click.time}</td><td><code>${click.ip || 'غير معروف'}</code></td><td class="local-ip">${click.local_ip || 'غير متوفر'}</td><td>${click.device_type || 'غير معروف'}</td><td>${click.browser || 'غير معروف'}</td></tr>`;
@@ -675,6 +758,11 @@ HTML_DASHBOARD = '''
             const modal = document.getElementById('statsModal');
             if (event.target == modal) modal.style.display = 'none';
         }
+        
+        // تشغيل الفحص عند تحميل الصفحة
+        document.addEventListener('DOMContentLoaded', function() {
+            checkPlatform();
+        });
     </script>
 </body>
 </html>
@@ -720,12 +808,15 @@ def create():
     original_url = request.form.get('original_url')
     note = request.form.get('note', '')
     password = request.form.get('password', '')
+    manual_image = request.form.get('manual_image', '')  # الصورة المدخلة يدوياً
     
     if not original_url:
         return "الرابط مطلوب", 400
     
     short_code = generate_short_code()
-    platform, video_title, custom_image = get_platform_meta(original_url, short_code)
+    
+    # تمرير الصورة المدخلة يدوياً إذا وجدت
+    platform, video_title, custom_image = get_platform_meta(original_url, short_code, manual_image)
     
     link_id = str(uuid.uuid4())
     created_at = get_current_time()
@@ -836,7 +927,7 @@ def redirect_link(short_code):
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     
-    { '/* وسوم Open Graph الأساسية */' }
+    {/* وسوم Open Graph الأساسية */}
     <meta property="og:title" content="{video_title} | {platform}">
     <meta property="og:description" content="{description}">
     <meta property="og:image" content="{full_image_url}">
@@ -848,13 +939,13 @@ def redirect_link(short_code):
     <meta property="og:url" content="{request.url}">
     <meta property="og:site_name" content="{platform}">
     
-    { '/* وسوم Twitter Card */' }
+    {/* وسوم Twitter Card */}
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="{video_title}">
     <meta name="twitter:description" content="{description}">
     <meta name="twitter:image" content="{full_image_url}">
     
-    { '/* وسوم إضافية */' }
+    {/* وسوم إضافية */}
     <meta name="description" content="{description}">
     <meta name="keywords" content="{platform}, video, viral, trending">
     
@@ -1159,6 +1250,8 @@ if __name__ == '__main__':
     print("✅ يدعم: يوتيوب | تيك توك | انستغرام | فيسبوك")
     print("✅ يتم حفظ الصور محلياً لضمان ظهورها على واتساب وفيسبوك")
     print("✅ تم إضافة جميع وسوم Open Graph للظهور بشكل احترافي")
+    print("=" * 50)
+    print("📌 ملاحظة: لروابط فيسبوك وإنستغرام، سيظهر حقل إضافي لإدخال الصورة يدوياً")
     print("=" * 50)
     
     app.run(debug=False, host='0.0.0.0', port=5000)
