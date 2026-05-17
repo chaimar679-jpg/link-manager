@@ -14,6 +14,9 @@ DB_FILE = "tracker_data.db"
 USERNAME = "khaled"
 PASSWORD = "ALG@2022"
 
+# مفتاح الـ API الخاص بك المدمج لحل مشكلة تيك توك سحابياً
+IMGBB_API_KEY = "3933daa4b3bfb333516bdc1f0abb8709"
+
 ALGIERS_TZ = pytz.timezone('Africa/Algiers')
 
 def get_gmt1_time():
@@ -79,6 +82,21 @@ def guess_device_by_hardware(ua_string, gpu, touch_points):
         
     return "Unknown Hardware Client"
 
+def upload_to_cloud(image_url):
+    """رفع الصورة تلقائياً إلى ImgBB لمنع انتهاء صلاحية روابط تيك توك في واتساب"""
+    try:
+        url = "https://api.imgbb.com/1/upload"
+        payload = {
+            "key": IMGBB_API_KEY,
+            "image": image_url
+        }
+        res = requests.post(url, data=payload, timeout=7)
+        if res.status_code == 200:
+            return res.json()['data']['url']
+    except Exception as e:
+        print(f"Cloud Upload Error: {e}")
+    return image_url
+
 def fetch_original_meta(url, manual_thumb_url=None):
     url_lower = url.lower()
     title = "Watch Trending Video Content in HD Quality"
@@ -107,7 +125,11 @@ def fetch_original_meta(url, manual_thumb_url=None):
             res = requests.get(f"https://www.tiktok.com/oembed?url={url}", headers=headers, timeout=5)
             if res.status_code == 200:
                 data = res.json()
-                return data.get('title', title), data.get('thumbnail_url', img)
+                fetched_title = data.get('title', title)
+                temp_img = data.get('thumbnail_url', img)
+                # استخدام الرفع السحابي لحل مشكلة معاينة تيك توك
+                permanent_img = upload_to_cloud(temp_img)
+                return fetched_title, permanent_img
         except: 
             pass
     elif "youtube.com" in url_lower or "youtu.be" in url_lower:
@@ -230,11 +252,12 @@ DASHBOARD_LAYOUT = '''
                 extractorLink.innerText = "🔗 اذهب إلى موقع استخراج صور Facebook";
                 document.getElementById('manual_thumbnail').required = true;
             } else if (low.includes("tiktok.com") || low.includes("vt.tiktok")) {
+                // تيك توك أصبح تلقائياً وسحابياً الآن، الحقل اليدوي يظهر كخيار احتياطي فقط
                 thumbWrapper.style.display = "block";
-                warningTitle.innerText = "⚠️ TikTok Link Detected (Fallback Support Active):";
+                warningTitle.innerText = "⚠️ TikTok Link Detected (Cloud Upload Active):";
                 extractorLink.href = "https://urlebird.com/";
                 extractorLink.innerText = "🔗 استخراج غلاف الفيديو احتياطياً إن لزم الأمر";
-                document.getElementById('manual_thumbnail').required = false; // نتركه اختيارياً لرؤية النتيجة التلقائية أولاً
+                document.getElementById('manual_thumbnail').required = false; 
             } else {
                 thumbWrapper.style.display = "none";
                 document.getElementById('manual_thumbnail').required = false;
