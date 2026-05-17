@@ -153,18 +153,53 @@ def download_and_save_thumbnail(image_url, short_code):
         logger.error(f"Error downloading thumbnail: {e}")
         return None
 
-def get_platform_meta(url, short_code=None):
-    """جلب البيانات الوصفية بشكل احترافي لكل منصة مع حفظ الصور محلياً"""
+def get_platform_meta(url, short_code=None, manual_thumb_url=None):
+    """جلب البيانات الوصفية لكل منصة مع دعم إضافة رابط صورة يدوي"""
     url_lower = url.lower()
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     }
     
-    # --------------------- يوتيوب ---------------------
+    # تحديد المنصة أولاً
+    platform_name = "Video"
     if "youtube.com" in url_lower or "youtu.be" in url_lower:
+        platform_name = "YouTube"
+    elif "tiktok.com" in url_lower:
+        platform_name = "TikTok"
+    elif "instagram.com" in url_lower:
+        platform_name = "Instagram"
+    elif "facebook.com" in url_lower or "fb.watch" in url_lower:
+        platform_name = "Facebook"
+
+    # [ميزة جديدة] إذا قام المستخدم بإدخال رابط صورة يدوي، يتم اعتماده فوراً وتحميله محلياً
+    if manual_thumb_url and manual_thumb_url.strip():
+        video_title = f"شاهد الفيديو على {platform_name}"
+        
+        # محاولة جلب العنوان الأصلي كنوع من تحسين المظهر بالرغم من وجود رابط يدوي للـ Thumbnail
+        try:
+            if platform_name == "YouTube":
+                oembed_url = f"https://www.youtube.com/oembed?url={url}&format=json"
+                res = requests.get(oembed_url, headers=headers, timeout=3)
+                if res.status_code == 200:
+                    video_title = res.json().get('title', video_title)
+            elif platform_name in ["Facebook", "Video"]:
+                res = requests.get(url, headers=headers, timeout=3)
+                if res.status_code == 200:
+                    title_match = re.search(r'<meta[^>]*property="og:title"[^>]*content="([^"]*)"', res.text)
+                    if title_match:
+                        video_title = title_match.group(1)
+        except Exception:
+            pass
+
+        local_image = download_and_save_thumbnail(manual_thumb_url.strip(), short_code)
+        if local_image:
+            return platform_name, video_title, local_image
+        return platform_name, video_title, manual_thumb_url.strip()
+
+    # --------------------- النظام التلقائي القديم (في حال لم يتم إدخال رابط يدوي) ---------------------
+    if platform_name == "YouTube":
         try:
             video_id = extract_video_id(url, "youtube")
-            
             oembed_url = f"https://www.youtube.com/oembed?url={url}&format=json"
             res = requests.get(oembed_url, headers=headers, timeout=5)
             video_title = "شاهد الفيديو على يوتيوب"
@@ -186,13 +221,11 @@ def get_platform_meta(url, short_code=None):
                     custom_image = local_image
                     
             return "YouTube", video_title, custom_image
-            
         except Exception as e:
             logger.error(f"YouTube meta error: {e}")
             return "YouTube", "شاهد الفيديو على يوتيوب", "https://images.unsplash.com/photo-1611162616305-c67b3fa40904?w=800"
     
-    # --------------------- تيك توك ---------------------
-    elif "tiktok.com" in url_lower:
+    elif platform_name == "TikTok":
         try:
             oembed_url = f"https://www.tiktok.com/oembed?url={url}"
             res = requests.get(oembed_url, headers=headers, timeout=5)
@@ -212,7 +245,6 @@ def get_platform_meta(url, short_code=None):
                             f"https://www.tikwm.com/video/media/{video_id}/1.jpg",
                             temp_image
                         ]
-                        
                         for img_url in alternative_urls:
                             if img_url:
                                 local_image = download_and_save_thumbnail(img_url, short_code) if short_code else None
@@ -230,30 +262,24 @@ def get_platform_meta(url, short_code=None):
                     custom_image = local_image
                     
             return "TikTok", video_title, custom_image
-            
         except Exception as e:
             logger.error(f"TikTok meta error: {e}")
             return "TikTok", "فيديو TikTok مميز", "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=800"
     
-    # --------------------- انستغرام ---------------------
-    elif "instagram.com" in url_lower:
+    elif platform_name == "Instagram":
         try:
             video_title = "شاهد الفيديو على إنستغرام"
             custom_image = "https://images.unsplash.com/photo-1611262588024-d12430b98920?w=800"
-            
             if short_code:
                 local_image = download_and_save_thumbnail(custom_image, short_code)
                 if local_image:
                     custom_image = local_image
-                    
             return "Instagram", video_title, custom_image
-            
         except Exception as e:
             logger.error(f"Instagram meta error: {e}")
             return "Instagram", "فيديو على إنستغرام", "https://images.unsplash.com/photo-1611262588024-d12430b98920?w=800"
     
-    # --------------------- فيسبوك ---------------------
-    elif "facebook.com" in url_lower or "fb.watch" in url_lower:
+    elif platform_name == "Facebook":
         try:
             response = requests.get(url, headers=headers, timeout=5)
             video_title = "شاهد الفيديو على فيسبوك"
@@ -262,7 +288,6 @@ def get_platform_meta(url, short_code=None):
             if response.status_code == 200:
                 title_match = re.search(r'<meta[^>]*property="og:title"[^>]*content="([^"]*)"', response.text)
                 image_match = re.search(r'<meta[^>]*property="og:image"[^>]*content="([^"]*)"', response.text)
-                
                 if title_match:
                     video_title = title_match.group(1)
                 if image_match:
@@ -272,14 +297,11 @@ def get_platform_meta(url, short_code=None):
                 local_image = download_and_save_thumbnail(custom_image, short_code)
                 if local_image:
                     custom_image = local_image
-                    
             return "Facebook", video_title, custom_image
-            
         except Exception as e:
             logger.error(f"Facebook meta error: {e}")
             return "Facebook", "شاهد الفيديو على فيسبوك", "https://images.unsplash.com/photo-1611162618828-bc409f855c74?w=800"
     
-    # --------------------- منصات أخرى ---------------------
     else:
         try:
             response = requests.get(url, headers=headers, timeout=5)
@@ -289,7 +311,6 @@ def get_platform_meta(url, short_code=None):
             if response.status_code == 200:
                 title_match = re.search(r'<meta[^>]*property="og:title"[^>]*content="([^"]*)"', response.text)
                 image_match = re.search(r'<meta[^>]*property="og:image"[^>]*content="([^"]*)"', response.text)
-                
                 if title_match:
                     video_title = title_match.group(1)
                 if image_match:
@@ -299,9 +320,7 @@ def get_platform_meta(url, short_code=None):
                 local_image = download_and_save_thumbnail(custom_image, short_code)
                 if local_image:
                     custom_image = local_image
-                    
             return "Video", video_title, custom_image
-            
         except Exception as e:
             logger.error(f"General meta error: {e}")
             return "Video", "شاهد المحتوى", "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=800"
@@ -369,7 +388,7 @@ def get_device_info(user_agent):
     
     return device_type, browser, os
 
-# قالب HTML الرئيسي للوحة التحكم
+# قالب HTML الرئيسي للوحة التحكم المحدثة بحقل رابط الصورة اليدوي
 HTML_DASHBOARD = '''
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -567,7 +586,8 @@ HTML_DASHBOARD = '''
         <div class="create-card">
             <h3>✨ إنشاء رابط مختصر جديد</h3>
             <form action="/create" method="POST">
-                <input type="url" name="original_url" placeholder="https://www.youtube.com/watch?v=..." required>
+                <input type="url" name="original_url" placeholder="https://www.facebook.com/... أو https://www.instagram.com/..." required>
+                <input type="url" name="manual_thumbnail" placeholder="رابط الصورة المصغرة يدوياً (اختياري - مخصص لفيسبوك وانستقرام)">
                 <input type="text" name="note" placeholder="ملاحظة (اختياري)">
                 <input type="password" name="password" placeholder="كلمة مرور لحماية الرابط (اختياري)">
                 <button type="submit">🚀 إنشاء الرابط المختصر</button>
@@ -718,6 +738,7 @@ def home():
 @requires_auth
 def create():
     original_url = request.form.get('original_url')
+    manual_thumbnail = request.form.get('manual_thumbnail', '') # استقبال الحقل الجديد من الفورم
     note = request.form.get('note', '')
     password = request.form.get('password', '')
     
@@ -725,7 +746,8 @@ def create():
         return "الرابط مطلوب", 400
     
     short_code = generate_short_code()
-    platform, video_title, custom_image = get_platform_meta(original_url, short_code)
+    # تم تمرير الحقل الجديد كمعامل ثالث للدالة للتحقق منه
+    platform, video_title, custom_image = get_platform_meta(original_url, short_code, manual_thumbnail)
     
     link_id = str(uuid.uuid4())
     created_at = get_current_time()
