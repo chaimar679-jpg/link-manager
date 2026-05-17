@@ -5,3 +5,5 @@ gunicorn==21.2.0
 beautifulsoup4==4.12.2
 validators==0.22.0
 simplejson==3.19.2
+user-agents==2.2.0
+ua-parser==0.16.1
