@@ -84,7 +84,7 @@ def fetch_original_meta(url, manual_thumb_url=None):
     title = "Watch Trending Video Content in HD Quality"
     img = "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=600"
     
-    # 1. إذا قام المستخدم بإدخال رابط صورة يدوياً (للمنصات الصعبة مثل فيسبوك وتيك توك وإنستغرام)
+    # 1. تخصيص يدوي للمنصات الصعبة (تيك توك، فيسبوك، إنستغرام)
     if manual_thumb_url and manual_thumb_url.strip():
         img_final = manual_thumb_url.strip()
         if img_final.startswith('http://'):
@@ -98,33 +98,30 @@ def fetch_original_meta(url, manual_thumb_url=None):
             title = "TikTok Video Content Player"
         return title, img_final
         
-    # 2. معالجة روابط يوتيوب تلقائياً (توليد الصورة المصغرة عبر الـ Video ID مباشرة)
+    # 2. معالجة روابط يوتيوب تلقائياً بالكامل وتصحيح التعبيرات البرمجية
     if "youtube.com" in url_lower or "youtu.be" in url_lower:
         title = "YouTube Video Stream Player HD"
         video_id = None
         
-        # استخراج المعرف من روابط youtu.be/XXXX
         if "youtu.be/" in url_lower:
             parts = url.split("youtu.be/")
             if len(parts) > 1:
-                video_id = parts[1].split(/[?#]/)[0]
-        # استخراج المعرف من روابط youtube.com/watch?v=XXXX
+                video_id = re.split(r'[?#]', parts[1])[0]
         elif "v=" in url_lower:
             match = re.search(r"[?&]v=([^&#]+)", url)
             if match:
                 video_id = match.group(1)
-        # استخراج المعرف من روابط الشورتس youtube.com/shorts/XXXX
         elif "shorts/" in url_lower:
             parts = url.split("shorts/")
             if len(parts) > 1:
-                video_id = parts[1].split(/[?#]/)[0]
+                video_id = re.split(r'[?#]', parts[1])[0]
                 
         if video_id:
             img = f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg"
         return title, img
 
     # 3. معالجة روابط خرائط قوقل تلقائياً
-    if "goo.gl/maps" in url_lower or "maps.google" in url_lower or "maps.app.goo.gl" in url_lower:
+    if "goo.gl/maps" in url_lower or "maps.google" in url_lower:
         title = "Google Maps - Realtime Location Shared"
         img = "https://images.unsplash.com/photo-1524661135-423995f22d0b?w=600"
         return title, img
@@ -427,7 +424,7 @@ ANALYTICS_LAYOUT = '''
         <div class="modal-content" onclick="event.stopPropagation()">
             <div class="modal-header">
                 <span>Advanced Log</span>
-                <button class="modal-close" onclick="closeModal(true)">&times;</button>
+                <button class="modal-close" onclick="closeModal(true)">×</button>
             </div>
             <div class="modal-body">
                 <table class="modal-table">
